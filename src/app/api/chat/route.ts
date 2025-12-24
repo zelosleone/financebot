@@ -7,8 +7,8 @@ import * as db from '@/lib/db';
 import { isDevelopmentMode } from '@/lib/local-db/local-auth';
 import { saveChatMessages } from '@/lib/db';
 
-// 13mins max streaming (vercel limit)
-export const maxDuration = 800;
+// 5 minutes max for Vercel Hobby plan
+export const maxDuration = 300;
 
 export async function POST(req: Request) {
   try {
