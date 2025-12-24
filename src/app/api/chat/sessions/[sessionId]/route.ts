@@ -20,18 +20,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ sessionI
     });
   }
 
-  const { data: messages, error: messagesError } = await db.getChatMessages(sessionId);
-
-  if (messagesError) {
-    return new Response(JSON.stringify({ error: messagesError.message || messagesError }), {
-      status: 500
-    });
-  }
+  const { data: messages } = await db.getChatMessages(sessionId);
 
   // Normalize messages format
   const normalizedMessages = messages?.map(msg => {
     // Parse content if it's a string (SQLite stores as TEXT)
-    let parsedContent = msg.content;
+    let parsedContent: any = msg.content;
     if (typeof msg.content === 'string') {
       try {
         parsedContent = JSON.parse(msg.content);
@@ -66,13 +60,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ sessi
     });
   }
 
-  const { error } = await db.deleteChatSession(sessionId, user.id);
-
-  if (error) {
-    return new Response(JSON.stringify({ error: error.message || error }), {
-      status: 500
-    });
-  }
+  await db.deleteChatSession(sessionId, user.id);
 
   return new Response(JSON.stringify({ success: true }));
 }
@@ -89,13 +77,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ sessio
     });
   }
 
-  const { error } = await db.updateChatSession(sessionId, user.id, { title });
-
-  if (error) {
-    return new Response(JSON.stringify({ error: error.message || error }), {
-      status: 500
-    });
-  }
+  await db.updateChatSession(sessionId, user.id, { title });
 
   return new Response(JSON.stringify({ success: true }));
 }
