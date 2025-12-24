@@ -58,6 +58,8 @@ export async function POST(req: Request) {
 
     // Detect available API keys and select provider/tools accordingly
     const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
+    const hasGLMKey = !!process.env.GLM_API_KEY;
+    const glmBaseUrl = process.env.GLM_BASE_URL || 'https://api.z.ai/api/coding/paas/v4';
     const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
     const lmstudioBaseUrl = process.env.LMSTUDIO_BASE_URL || 'http://localhost:1234';
 
@@ -176,11 +178,23 @@ export async function POST(req: Request) {
           : 'Vercel AI Gateway ("gpt-5") - Development Mode Fallback';
       }
     } else {
-      // Production mode: Use standard OpenAI - billing handled by Valyu OAuth proxy
-      selectedModel = hasOpenAIKey ? openai("gpt-5") : "openai/gpt-5";
-      modelInfo = hasOpenAIKey
-        ? "OpenAI (gpt-5) - Production Mode (Valyu Credits)"
-        : 'Vercel AI Gateway ("gpt-5") - Production Mode (Valyu Credits)';
+      // Production mode: Use GLM (preferred), OpenAI, or Vercel AI Gateway
+      if (hasGLMKey) {
+        // Use Zhipu AI GLM as primary provider
+        const glmClient = createOpenAI({
+          baseURL: glmBaseUrl,
+          apiKey: process.env.GLM_API_KEY!,
+        });
+        const glmModel = process.env.GLM_MODEL || 'glm-4-plus';
+        selectedModel = glmClient.chat(glmModel);
+        modelInfo = `Zhipu AI GLM (${glmModel}) - Production Mode`;
+      } else if (hasOpenAIKey) {
+        selectedModel = openai("gpt-5");
+        modelInfo = "OpenAI (gpt-5) - Production Mode (Valyu Credits)";
+      } else {
+        selectedModel = "openai/gpt-5";
+        modelInfo = 'Vercel AI Gateway ("gpt-5") - Production Mode (Valyu Credits)';
+      }
     }
 
     console.log("[Chat API] Model selected:", modelInfo);
