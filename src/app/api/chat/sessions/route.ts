@@ -11,14 +11,7 @@ export async function GET(req: Request) {
     });
   }
 
-  const { data: sessions, error } = await db.getChatSessions(user.id);
-
-  if (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" }
-    });
-  }
+  const { data: sessions } = await db.getChatSessions(user.id);
 
   // Normalize field names for client consistency
   const normalizedSessions = sessions?.map((s: any) => ({
@@ -47,18 +40,11 @@ export async function POST(req: Request) {
   }
 
   const sessionId = randomUUID();
-  const { error } = await db.createChatSession({
+  await db.createChatSession({
     id: sessionId,
     user_id: user.id,
     title
   });
-
-  if (error) {
-    return new Response(JSON.stringify({ error: error.message || error }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" }
-    });
-  }
 
   // Fetch the newly created session
   const { data: session } = await db.getChatSession(sessionId, user.id);
