@@ -108,17 +108,17 @@ InlineChartRenderer.displayName = 'InlineChartRenderer';
 // CSV rendering now handled by shared CsvRenderer component
 
 // Component to render grouped citations with hover card
-const GroupedCitationBadge = React.memo(({ 
-  citationKeys, 
-  citations 
-}: { 
-  citationKeys: string[]; 
+const GroupedCitationBadge = React.memo(({
+  citationKeys,
+  citations
+}: {
+  citationKeys: string[];
   citations: CitationMap;
 }) => {
   // Collect all citations from all keys
   const allCitations: any[] = [];
   const allSources: string[] = [];
-  
+
   citationKeys.forEach(key => {
     const citationList = citations[key] || [];
     citationList.forEach(citation => {
@@ -128,7 +128,7 @@ const GroupedCitationBadge = React.memo(({
       }
     });
   });
-  
+
   if (allCitations.length === 0) {
     // If no citations found, just show the keys without hover
     return <span className="text-blue-600 dark:text-blue-400">{citationKeys.join('')}</span>;
@@ -194,7 +194,7 @@ const parseGroupedCitations = (text: string): { segments: Array<{ type: 'text' |
     // Parse the citation group
     const citationGroup = match[0];
     const citations: string[] = [];
-    
+
     if (citationGroup.includes(',')) {
       // Handle [1,2,3] format
       const numbers = citationGroup.match(/\d+/g) || [];
@@ -233,7 +233,7 @@ const createMarkdownComponents = (citations: CitationMap) => ({
     const processedChildren = React.Children.map(children, (child) => {
       if (typeof child === 'string') {
         const { segments } = parseGroupedCitations(child);
-        
+
         if (segments.some(s => s.type === 'citation-group')) {
           return segments.map((segment, idx) => {
             if (segment.type === 'citation-group' && segment.citations) {
@@ -248,13 +248,13 @@ const createMarkdownComponents = (citations: CitationMap) => ({
 
     return <p {...props}>{processedChildren}</p>;
   },
-  
+
   // Handle other text containers similarly
   li: ({ children, ...props }: any) => {
     const processedChildren = React.Children.map(children, (child) => {
       if (typeof child === 'string') {
         const { segments } = parseGroupedCitations(child);
-        
+
         if (segments.some(s => s.type === 'citation-group')) {
           return segments.map((segment, idx) => {
             if (segment.type === 'citation-group' && segment.citations) {
@@ -269,7 +269,7 @@ const createMarkdownComponents = (citations: CitationMap) => ({
 
     return <li {...props}>{processedChildren}</li>;
   },
-  
+
   // Handle math rendering
   math: ({ children }: any) => {
     const mathContent = typeof children === "string" ? children : children?.toString() || "";
@@ -284,7 +284,7 @@ const createMarkdownComponents = (citations: CitationMap) => ({
       return <code className="math-fallback bg-gray-100 px-1 rounded">{mathContent}</code>;
     }
   },
-  
+
   // Handle images and special references (charts and CSVs)
   // Note: We can't return block-level elements (div) from img handler as ReactMarkdown wraps them in <p>
   // CSVs and charts are handled via preprocessing instead
@@ -304,6 +304,7 @@ const createMarkdownComponents = (citations: CitationMap) => ({
       }
     }
 
+    // eslint-disable-next-line @next/next/no-img-element
     return <img src={src} alt={alt || ""} {...props} />;
   },
 

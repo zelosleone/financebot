@@ -30,6 +30,7 @@ export function Favicon({
     return null;
   }
 
+  // eslint-disable-next-line @next/next/no-img-element
   return (
     <img
       src={faviconUrl}

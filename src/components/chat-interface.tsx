@@ -37,6 +37,7 @@ import {
 } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
+import { AuthModal } from "@/components/auth/auth-modal";
 import { useSearchParams } from "next/navigation";
 import {
   RotateCcw,
@@ -908,7 +909,7 @@ const MemoizedTextPartWithCitations = memo(
       }
 
       return citationMap;
-    }, [messageParts, currentPartIndex, allMessages, currentMessageIndex]); // Only recompute when parts array changes, not text
+    }, [messageParts, allMessages, currentMessageIndex]); // Only recompute when parts array changes, not text
 
     // Memoize whether citations exist to avoid Object.keys() on every render
     const hasCitations = useMemo(() => {
@@ -1029,6 +1030,7 @@ const SearchResultCard = ({
               <div className="flex-shrink-0 pt-0.5">
                 {type === "wiley" ? (
                   <div className="w-5 h-5 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src="/wy.svg"
                       alt="Wiley"
@@ -1111,6 +1113,7 @@ const SearchResultCard = ({
               <div className="flex-shrink-0 pt-0.5">
                 {type === "wiley" ? (
                   <div className="w-5 h-5 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src="/wy.svg"
                       alt="Wiley"
@@ -1376,16 +1379,16 @@ const SearchResultsCarousel = ({
     setDialogOpen(true);
   };
 
-  const handlePrev = (e?: React.MouseEvent) => {
+  const handlePrev = useCallback((e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     setSelectedIndex(
       (prev) => (prev - 1 + allImages.length) % allImages.length
     );
-  };
-  const handleNext = (e?: React.MouseEvent) => {
+  }, [allImages.length]);
+  const handleNext = useCallback((e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     setSelectedIndex((prev) => (prev + 1) % allImages.length);
-  };
+  }, [allImages.length]);
 
   useEffect(() => {
     if (!dialogOpen) return;
@@ -1824,7 +1827,8 @@ export function ChatInterface({
           headers,
         };
       }
-    }), [selectedModel, selectedProvider, user, getValidValyuAccessToken]
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }), [selectedModel, selectedProvider]
   );
 
   const {
@@ -2017,6 +2021,7 @@ export function ChatInterface({
   // Notify parent component about message state changes
   useEffect(() => {
     onMessagesChange?.(messages.length > 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length]); // Remove onMessagesChange from dependencies to prevent infinite loops
 
 
@@ -2070,8 +2075,8 @@ export function ChatInterface({
       setVisibleRange({ start: 0, end: Math.min(deferredMessages.length, 30) });
       requestAnimationFrame(updateVisibleRange);
     }
-    // Removed updateVisibleRange from dependencies - prevents infinite loop
-  }, [virtualizationEnabled, deferredMessages.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [virtualizationEnabled, deferredMessages.length]); // updateVisibleRange omitted to prevent infinite loop
   useEffect(() => {
     const onResize = () => updateVisibleRange();
     window.addEventListener("resize", onResize);
