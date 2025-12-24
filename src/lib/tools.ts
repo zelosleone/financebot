@@ -1,61 +1,163 @@
 import { z } from "zod";
 import { tool } from "ai";
-import { Valyu } from "valyu-js";
 import { track } from "@vercel/analytics/server";
 import { Daytona } from '@daytonaio/sdk';
 import * as db from '@/lib/db';
 import { randomUUID } from 'crypto';
 
-// Valyu OAuth Proxy URL (for user credit billing)
-const VALYU_OAUTH_PROXY_URL = process.env.VALYU_OAUTH_PROXY_URL ||
-  `${process.env.VALYU_APP_URL || process.env.NEXT_PUBLIC_VALYU_APP_URL || 'https://platform.valyu.ai'}/api/oauth/proxy`;
+// =============================================================================
+// API HELPERS: Twelve Data, Alpha Vantage, Brave Search
+// =============================================================================
 
 /**
- * Call Valyu DeepSearch API via OAuth proxy (user credits) or direct (server API key)
- *
- * DeepSearch is the primary search endpoint that handles credit billing.
- * All searches go through /v1/deepsearch for comprehensive financial data retrieval.
+ * Call Twelve Data API for stock prices, fundamentals, and market data.
+ * Supports 80+ global exchanges including Borsa Istanbul (BIST).
+ * Free tier: 8 credits/minute (~800/day)
  */
-async function callValyuApi(
-  path: string,
-  body: any,
-  valyuAccessToken?: string
+async function callTwelveDataApi(
+  endpoint: string,
+  params: Record<string, string>
 ): Promise<any> {
-  if (valyuAccessToken) {
-    // Use OAuth proxy - charges to user's org credits
-    console.log('[callValyuApi] Using OAuth proxy for user credit billing, path:', path);
-    const response = await fetch(VALYU_OAUTH_PROXY_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${valyuAccessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ path, method: 'POST', body }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'proxy_failed' }));
-      throw new Error(error.error_description || error.error || 'Valyu proxy request failed');
-    }
-
-    return response.json();
-  } else {
-    // Fallback to server API key (dev mode only)
-    console.log('[callValyuApi] Using server API key (fallback/dev mode)');
-    const apiKey = process.env.VALYU_API_KEY;
-    if (!apiKey) {
-      throw new Error('No Valyu API key available');
-    }
-    const valyu = new Valyu(apiKey, 'https://api.valyu.ai/v1');
-
-    // The Valyu SDK's search() method calls /deepsearch endpoint internally
-    // Parse the path to determine the method
-    if (path === '/v1/deepsearch') {
-      return valyu.search(body.query, body);
-    }
-
-    throw new Error(`Unknown Valyu API path: ${path}`);
+  const apiKey = process.env.TWELVE_DATA_API_KEY;
+  if (!apiKey) {
+    throw new Error('TWELVE_DATA_API_KEY not configured');
   }
+
+  const url = new URL(`https://api.twelvedata.com${endpoint}`);
+  url.searchParams.set('apikey', apiKey);
+  Object.entries(params).forEach(([key, value]) => {
+    url.searchParams.set(key, value);
+  });
+
+  console.log('[TwelveData] Calling:', endpoint, params);
+  const response = await fetch(url.toString());
+
+  if (!response.ok) {
+    throw new Error(`Twelve Data API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  if (data.status === 'error') {
+    throw new Error(data.message || 'Twelve Data API error');
+  }
+
+  return data;
+}
+
+/**
+ * Call Alpha Vantage API for technical indicators and news sentiment.
+ * Free tier: 25 requests/day, 5/minute
+ */
+async function callAlphaVantageApi(
+  functionName: string,
+  params: Record<string, string>
+): Promise<any> {
+  const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
+  if (!apiKey) {
+    throw new Error('ALPHA_VANTAGE_API_KEY not configured');
+  }
+
+  const url = new URL('https://www.alphavantage.co/query');
+  url.searchParams.set('function', functionName);
+  url.searchParams.set('apikey', apiKey);
+  Object.entries(params).forEach(([key, value]) => {
+    url.searchParams.set(key, value);
+  });
+
+  console.log('[AlphaVantage] Calling:', functionName, params);
+  const response = await fetch(url.toString());
+
+  if (!response.ok) {
+    throw new Error(`Alpha Vantage API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  if (data['Error Message']) {
+    throw new Error(data['Error Message']);
+  }
+  if (data['Note']) {
+    throw new Error('Alpha Vantage rate limit reached. Try again later.');
+  }
+
+  return data;
+}
+
+/**
+ * Call Brave Search API for web search, news, and SEC filings.
+ * Free tier: 2,000 requests/month
+ */
+async function callBraveSearch(
+  query: string,
+  options?: {
+    count?: number;
+    domainFilter?: string[];
+    freshness?: 'day' | 'week' | 'month' | 'year';
+  }
+): Promise<any> {
+  const apiKey = process.env.BRAVE_SEARCH_API_KEY;
+  if (!apiKey) {
+    throw new Error('BRAVE_SEARCH_API_KEY not configured');
+  }
+
+  const url = new URL('https://api.search.brave.com/res/v1/web/search');
+  url.searchParams.set('q', query);
+  url.searchParams.set('count', String(options?.count || 10));
+
+  if (options?.domainFilter && options.domainFilter.length > 0) {
+    // Brave uses site: syntax in query for domain filtering
+    const domainQuery = options.domainFilter.map(d => `site:${d}`).join(' OR ');
+    url.searchParams.set('q', `${query} (${domainQuery})`);
+  }
+
+  if (options?.freshness) {
+    url.searchParams.set('freshness', options.freshness);
+  }
+
+  console.log('[BraveSearch] Searching:', query);
+  const response = await fetch(url.toString(), {
+    headers: {
+      'Accept': 'application/json',
+      'X-Subscription-Token': apiKey,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Brave Search API error: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Call Massive (formerly Polygon.io) API for stocks, options, and market data.
+ * Free tier: 5 API calls/minute, 2 years historical, 100% US market coverage
+ */
+async function callMassiveApi(
+  endpoint: string,
+  params?: Record<string, string>
+): Promise<any> {
+  const apiKey = process.env.MASSIVE_API_KEY;
+  if (!apiKey) {
+    throw new Error('MASSIVE_API_KEY not configured');
+  }
+
+  const url = new URL(`https://api.polygon.io${endpoint}`);
+  url.searchParams.set('apiKey', apiKey);
+  if (params) {
+    Object.entries(params).forEach(([key, value]) => {
+      url.searchParams.set(key, value);
+    });
+  }
+
+  console.log('[Massive] Calling:', endpoint, params);
+  const response = await fetch(url.toString());
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Massive API error: ${response.status} - ${errorText}`);
+  }
+
+  return response.json();
 }
 
 
@@ -596,112 +698,149 @@ ${execution.result || "(No output produced)"}
   }),
 
   financialSearch: tool({
-    description:
-      "Search for comprehensive financial data including real-time market data, earnings reports, SEC filings, regulatory updates, and financial news using Valyu DeepSearch API",
+    description: `Search for financial market data using Twelve Data and Alpha Vantage APIs.
+    
+    Supports:
+    - Stock prices (real-time & historical) from 80+ exchanges including BIST (Turkey)
+    - Forex and cryptocurrency rates
+    - Company fundamentals (earnings, income statements, balance sheets)
+    - Technical indicators (60+ available via Alpha Vantage)
+    - Market news and sentiment analysis`,
     inputSchema: z.object({
-      query: z
+      symbol: z
         .string()
         .describe(
-          'Financial search query (e.g., "Apple latest quarterly earnings", "Bitcoin price trends", "Tesla SEC filings")'
+          'Stock/crypto symbol (e.g., "AAPL", "THYAO.IS" for Turkish stocks, "BTC/USD" for crypto)'
         ),
       dataType: z
         .enum([
-          "auto",
-          "market_data",
+          "quote",
+          "time_series",
           "earnings",
-          "sec_filings",
+          "fundamentals",
+          "technical",
           "news",
-          "regulatory",
         ])
+        .describe("Type of financial data to retrieve"),
+      interval: z
+        .enum(["1min", "5min", "15min", "30min", "1h", "4h", "1day", "1week", "1month"])
         .optional()
-        .describe("Type of financial data to focus on"),
-      maxResults: z
+        .default("1day")
+        .describe("Time interval for time series data"),
+      outputSize: z
         .number()
         .min(1)
-        .max(20)
+        .max(100)
         .optional()
-        .default(10)
-        .describe(
-          "Maximum number of results to return. This is not number of daya/hours of stock data, for example 1 yr of stock data for 1 company is 1 result"
-        ),
+        .default(30)
+        .describe("Number of data points to return"),
     }),
-    execute: async ({ query, dataType, maxResults }, options) => {
-      const valyuAccessToken = (options as any)?.experimental_context?.valyuAccessToken;
-
+    execute: async ({ symbol, dataType, interval, outputSize }) => {
       try {
-        // Configure search based on data type
-        const searchOptions: any = {
-          query,
-          maxNumResults: maxResults || 10,
-        };
+        let result: any;
 
-        const response = await callValyuApi('/v1/deepsearch', searchOptions, valyuAccessToken);
+        switch (dataType) {
+          case "quote": {
+            // Get current price from Twelve Data
+            result = await callTwelveDataApi('/quote', { symbol });
+            break;
+          }
 
-        // Track Valyu financial search call
-        await track('Valyu API Call', {
+          case "time_series": {
+            // Get historical prices from Twelve Data
+            result = await callTwelveDataApi('/time_series', {
+              symbol,
+              interval: interval || '1day',
+              outputsize: String(outputSize || 30),
+            });
+            break;
+          }
+
+          case "earnings": {
+            // Get earnings from Twelve Data
+            result = await callTwelveDataApi('/earnings', { symbol });
+            break;
+          }
+
+          case "fundamentals": {
+            // Get income statement from Twelve Data
+            const income = await callTwelveDataApi('/income_statement', { symbol });
+            const balance = await callTwelveDataApi('/balance_sheet', { symbol });
+            result = { income_statement: income, balance_sheet: balance };
+            break;
+          }
+
+          case "technical": {
+            // Get technical indicators from Alpha Vantage (more comprehensive)
+            const rsi = await callAlphaVantageApi('RSI', {
+              symbol,
+              interval: 'daily',
+              time_period: '14',
+              series_type: 'close',
+            });
+            const macd = await callAlphaVantageApi('MACD', {
+              symbol,
+              interval: 'daily',
+              series_type: 'close',
+            });
+            result = { rsi, macd };
+            break;
+          }
+
+          case "news": {
+            // Get news and sentiment from Alpha Vantage
+            result = await callAlphaVantageApi('NEWS_SENTIMENT', {
+              tickers: symbol,
+              limit: String(outputSize || 10),
+            });
+            break;
+          }
+        }
+
+        // Track API call
+        await track('Financial API Call', {
           toolType: 'financialSearch',
-          query: query,
-          dataType: dataType || 'auto',
-          maxResults: maxResults || 10,
-          resultCount: response?.results?.length || 0,
-          usedOAuthProxy: !!valyuAccessToken,
-          cost: (response as any)?.total_deduction_dollars || null,
-          txId: (response as any)?.tx_id || null
+          symbol,
+          dataType,
+          provider: dataType === 'technical' || dataType === 'news' ? 'alpha_vantage' : 'twelve_data',
         });
 
-        if (!response || !response.results || response.results.length === 0) {
-          return `🔍 No financial data found for "${query}". Try rephrasing your search or checking if the company/symbol exists.`;
-        }
-        // Return structured data for the model to process
-        const formattedResponse = {
-          type: "financial_search",
-          query: query,
-          dataType: dataType,
-          resultCount: response.results.length,
-          results: response.results.map((result: any) => ({
-            title: result.title || "Financial Data",
-            url: result.url,
-            content: result.content,
-            date: result.metadata?.date,
-            source: result.metadata?.source,
-            dataType: result.data_type,
-            length: result.length,
-            image_url: result.image_url || {},
-            relevance_score: result.relevance_score,
-          })),
-        };
+        return JSON.stringify({
+          type: "financial_data",
+          symbol,
+          dataType,
+          data: result,
+        }, null, 2);
 
-        return JSON.stringify(formattedResponse, null, 2);
       } catch (error) {
         if (error instanceof Error) {
-          if (
-            error.message.includes("401") ||
-            error.message.includes("unauthorized")
-          ) {
-            return "🔐 Invalid Valyu API key. Please check your VALYU_API_KEY environment variable.";
-          }
-          if (error.message.includes("429")) {
+          if (error.message.includes('rate limit')) {
             return "⏱️ Rate limit exceeded. Please try again in a moment.";
           }
-          if (
-            error.message.includes("network") ||
-            error.message.includes("fetch")
-          ) {
-            return "🌐 Network error connecting to Valyu API. Please check your internet connection.";
+          if (error.message.includes('not configured')) {
+            return `🔐 ${error.message}. Please set up your API keys.`;
           }
         }
-
-        return `❌ Error searching financial data: ${error instanceof Error ? error.message : "Unknown error"
-          }`;
+        return `❌ Error fetching financial data: ${error instanceof Error ? error.message : "Unknown error"}`;
       }
     },
   }),
 
-  wileySearch: tool({
-    description:
-      "Wiley finance/business/accounting corpus search for authoritative academic content",
+  secFilingsSearch: tool({
+    description: `Search SEC EDGAR filings (10-K, 10-Q, 8-K, etc.) using Brave Search with sec.gov domain filter.
+    
+    Use this to find:
+    - Annual reports (10-K)
+    - Quarterly reports (10-Q)
+    - Current reports (8-K)
+    - Insider trading filings (Form 4)
+    - Proxy statements (DEF 14A)`,
     inputSchema: z.object({
-      query: z.string().describe("Search query for Wiley finance/business/accounting corpus"),
+      query: z
+        .string()
+        .describe(
+          'SEC filing search query (e.g., "Apple 10-K 2024", "Tesla 8-K", "NVIDIA quarterly report")'
+        ),
       maxResults: z
         .number()
         .min(1)
@@ -710,180 +849,284 @@ ${execution.result || "(No output produced)"}
         .default(10)
         .describe("Maximum number of results to return"),
     }),
-    execute: async ({ query, maxResults }, options) => {
-      const valyuAccessToken = (options as any)?.experimental_context?.valyuAccessToken;
-
+    execute: async ({ query, maxResults }) => {
       try {
-        // Configure search options for Wiley sources
-        const searchOptions: any = {
-          query,
-          maxNumResults: maxResults || 10,
-          includedSources: [
-            "wiley/wiley-finance-papers",
-            "wiley/wiley-finance-books"
-          ]
-        };
-
-        const response = await callValyuApi('/v1/deepsearch', searchOptions, valyuAccessToken);
-
-        // Track Valyu Wiley search call
-        await track('Valyu API Call', {
-          toolType: 'wileySearch',
-          query: query,
-          maxResults: maxResults || 10,
-          resultCount: response?.results?.length || 0,
-          usedOAuthProxy: !!valyuAccessToken,
-          cost: (response as any)?.total_deduction_dollars || null,
-          txId: (response as any)?.tx_id || null
+        const response = await callBraveSearch(query, {
+          count: maxResults || 10,
+          domainFilter: ['sec.gov', 'edgar.sec.gov'],
         });
 
-        if (!response || !response.results || response.results.length === 0) {
-          return `🔍 No Wiley academic results found for "${query}". Try rephrasing your search.`;
+        // Track API call
+        await track('Brave Search API Call', {
+          toolType: 'secFilingsSearch',
+          query,
+          resultCount: response?.web?.results?.length || 0,
+        });
+
+        if (!response?.web?.results || response.web.results.length === 0) {
+          return `🔍 No SEC filings found for "${query}". Try different keywords or company name.`;
         }
 
-        // Return structured data for the model to process
         const formattedResponse = {
-          type: "wiley_search",
-          query: query,
-          resultCount: response.results.length,
-          results: response.results.map((result: any) => ({
-            title: result.title || "Wiley Academic Result",
+          type: "sec_filings_search",
+          query,
+          resultCount: response.web.results.length,
+          results: response.web.results.map((result: any) => ({
+            title: result.title,
             url: result.url,
-            content: result.content,
-            date: result.metadata?.date,
-            source: result.metadata?.source,
-            dataType: result.data_type,
-            length: result.length,
-            image_url: result.image_url || {},
-            relevance_score: result.relevance_score,
+            description: result.description,
+            age: result.age,
           })),
         };
 
         return JSON.stringify(formattedResponse, null, 2);
       } catch (error) {
         if (error instanceof Error) {
-          if (
-            error.message.includes("401") ||
-            error.message.includes("unauthorized")
-          ) {
-            return "🔐 Invalid Valyu API key. Please check your VALYU_API_KEY environment variable.";
-          }
-          if (error.message.includes("429")) {
-            return "⏱️ Rate limit exceeded. Please try again in a moment.";
-          }
-          if (
-            error.message.includes("network") ||
-            error.message.includes("fetch")
-          ) {
-            return "🌐 Network error connecting to Valyu API. Please check your internet connection.";
+          if (error.message.includes('not configured')) {
+            return `🔐 ${error.message}. Please set up your Brave Search API key.`;
           }
         }
-
-        return `❌ Error searching Wiley academic data: ${error instanceof Error ? error.message : "Unknown error"
-          }`;
+        return `❌ Error searching SEC filings: ${error instanceof Error ? error.message : "Unknown error"}`;
       }
     },
   }),
 
   webSearch: tool({
     description:
-      "Search the web for general information on any topic using Valyu DeepSearch API with access to both proprietary sources and web content",
+      "Search the web for general information using Brave Search API",
     inputSchema: z.object({
       query: z
         .string()
         .describe(
-          'Search query for any topic (e.g., "benefits of renewable energy", "latest AI developments", "climate change solutions")'
+          'Search query for any topic (e.g., "latest cryptocurrency news", "AI developments 2024")'
         ),
       maxResults: z
         .number()
         .min(1)
         .max(20)
         .optional()
-        .default(5)
+        .default(10)
         .describe("Maximum number of results to return"),
+      freshness: z
+        .enum(["day", "week", "month", "year"])
+        .optional()
+        .describe("Filter results by recency"),
     }),
-    execute: async ({ query, maxResults }, options) => {
-      const valyuAccessToken = (options as any)?.experimental_context?.valyuAccessToken;
-
+    execute: async ({ query, maxResults, freshness }) => {
       try {
-        // Configure search options
-        const searchOptions = {
-          query,
-          searchType: "all" as const, // Search both proprietary and web sources
-          maxNumResults: maxResults || 5,
-          isToolCall: true, // true for AI agents/tools
-        };
-
-        const response = await callValyuApi('/v1/deepsearch', searchOptions, valyuAccessToken);
-
-        // Track Valyu web search call
-        await track('Valyu API Call', {
-          toolType: 'webSearch',
-          query: query,
-          maxResults: maxResults || 5,
-          resultCount: response?.results?.length || 0,
-          usedOAuthProxy: !!valyuAccessToken,
-          cost: (response as any)?.metadata?.totalCost || (response as any)?.total_deduction_dollars || null,
-          searchTime: (response as any)?.metadata?.searchTime || null,
-          txId: (response as any)?.tx_id || null
+        const response = await callBraveSearch(query, {
+          count: maxResults || 10,
+          freshness,
         });
 
-        if (!response || !response.results || response.results.length === 0) {
-          return `🔍 No web results found for "${query}". Try rephrasing your search with different keywords.`;
+        // Track API call
+        await track('Brave Search API Call', {
+          toolType: 'webSearch',
+          query,
+          resultCount: response?.web?.results?.length || 0,
+          ...(freshness && { freshness }),
+        });
+
+        if (!response?.web?.results || response.web.results.length === 0) {
+          return `🔍 No web results found for "${query}". Try different keywords.`;
         }
 
-        // Log key information about the search
-        const metadata = (response as any).metadata;
-        // Return structured data for the model to process
         const formattedResponse = {
           type: "web_search",
-          query: query,
-          resultCount: response.results.length,
-          metadata: {
-            totalCost: metadata?.totalCost,
-            searchTime: metadata?.searchTime,
-          },
-          results: response.results.map((result: any) => ({
-            title: result.title || "Web Result",
+          query,
+          resultCount: response.web.results.length,
+          results: response.web.results.map((result: any) => ({
+            title: result.title,
             url: result.url,
-            content: result.content,
-            date: result.metadata?.date,
-            source: result.metadata?.source,
-            dataType: result.data_type,
-            length: result.length,
-            image_url: result.image_url || {},
-            relevance_score: result.relevance_score,
+            description: result.description,
+            age: result.age,
           })),
         };
 
         return JSON.stringify(formattedResponse, null, 2);
       } catch (error) {
         if (error instanceof Error) {
-          if (
-            error.message.includes("401") ||
-            error.message.includes("unauthorized")
-          ) {
-            return "🔐 Authentication error with Valyu API. Please check your configuration.";
+          if (error.message.includes('not configured')) {
+            return `🔐 ${error.message}. Please set up your Brave Search API key.`;
           }
-          if (error.message.includes("429")) {
+          if (error.message.includes('429')) {
             return "⏱️ Rate limit exceeded. Please try again in a moment.";
           }
-          if (
-            error.message.includes("network") ||
-            error.message.includes("fetch")
-          ) {
-            return "🌐 Network error connecting to Valyu API. Please check your internet connection.";
+        }
+        return `❌ Error performing web search: ${error instanceof Error ? error.message : "Unknown error"}`;
+      }
+    },
+  }),
+
+  optionsSearch: tool({
+    description: `Search options chain data using Massive (Polygon.io) API.
+    
+    Get options contracts, pricing, and Greeks for any US stock.
+    Free tier: 5 API calls/minute, 2 years historical data.`,
+    inputSchema: z.object({
+      symbol: z
+        .string()
+        .describe('Stock symbol (e.g., "AAPL", "TSLA", "SPY")'),
+      expirationDate: z
+        .string()
+        .optional()
+        .describe('Expiration date filter (YYYY-MM-DD format)'),
+      contractType: z
+        .enum(["call", "put"])
+        .optional()
+        .describe('Filter by call or put options'),
+    }),
+    execute: async ({ symbol, expirationDate, contractType }) => {
+      try {
+        // Get options contracts for the symbol
+        const params: Record<string, string> = {};
+        if (expirationDate) params.expiration_date = expirationDate;
+        if (contractType) params.contract_type = contractType;
+        params.limit = '50';
+
+        const result = await callMassiveApi(
+          `/v3/reference/options/contracts`,
+          { underlying_ticker: symbol, ...params }
+        );
+
+        // Track API call
+        await track('Massive API Call', {
+          toolType: 'optionsSearch',
+          symbol,
+          resultCount: result?.results?.length || 0,
+        });
+
+        if (!result?.results || result.results.length === 0) {
+          return `🔍 No options contracts found for "${symbol}". Check if the symbol is correct.`;
+        }
+
+        return JSON.stringify({
+          type: "options_data",
+          symbol,
+          expirationDate,
+          contractType,
+          contractCount: result.results.length,
+          contracts: result.results.slice(0, 20).map((c: any) => ({
+            ticker: c.ticker,
+            expirationDate: c.expiration_date,
+            strikePrice: c.strike_price,
+            contractType: c.contract_type,
+            shares: c.shares_per_contract,
+          })),
+        }, null, 2);
+
+      } catch (error) {
+        if (error instanceof Error) {
+          if (error.message.includes('not configured')) {
+            return `🔐 ${error.message}. Please set up your Massive API key.`;
           }
-          if (
-            error.message.includes("price") ||
-            error.message.includes("cost")
-          ) {
-            return "💰 Search cost exceeded maximum budget. Try reducing maxPrice or using more specific queries.";
+        }
+        return `❌ Error fetching options data: ${error instanceof Error ? error.message : "Unknown error"}`;
+      }
+    },
+  }),
+
+  massiveSearch: tool({
+    description: `Search comprehensive market data using Massive (Polygon.io) API.
+    
+    Access stocks, options, indices, forex, and crypto data.
+    Features: EOD data, minute bars, corporate actions, dividends, splits.
+    Free tier: 5 API calls/minute, 2 years historical, 100% US market coverage.`,
+    inputSchema: z.object({
+      symbol: z
+        .string()
+        .describe('Ticker symbol (e.g., "AAPL", "X:BTCUSD" for crypto, "C:EURUSD" for forex)'),
+      dataType: z
+        .enum([
+          "snapshot",
+          "aggregates",
+          "dividends",
+          "splits",
+          "financials",
+          "ticker_details",
+        ])
+        .describe("Type of data to retrieve"),
+      from: z
+        .string()
+        .optional()
+        .describe('Start date for aggregates (YYYY-MM-DD)'),
+      to: z
+        .string()
+        .optional()
+        .describe('End date for aggregates (YYYY-MM-DD)'),
+      timespan: z
+        .enum(["minute", "hour", "day", "week", "month"])
+        .optional()
+        .default("day")
+        .describe('Time span for aggregates'),
+    }),
+    execute: async ({ symbol, dataType, from, to, timespan }) => {
+      try {
+        let result: any;
+
+        switch (dataType) {
+          case "snapshot": {
+            // Get current snapshot
+            result = await callMassiveApi(`/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}`);
+            break;
+          }
+
+          case "aggregates": {
+            // Get historical bars
+            const fromDate = from || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            const toDate = to || new Date().toISOString().split('T')[0];
+            result = await callMassiveApi(
+              `/v2/aggs/ticker/${symbol}/range/1/${timespan || 'day'}/${fromDate}/${toDate}`,
+              { limit: '100' }
+            );
+            break;
+          }
+
+          case "dividends": {
+            result = await callMassiveApi(`/v3/reference/dividends`, { ticker: symbol, limit: '20' });
+            break;
+          }
+
+          case "splits": {
+            result = await callMassiveApi(`/v3/reference/splits`, { ticker: symbol, limit: '20' });
+            break;
+          }
+
+          case "financials": {
+            result = await callMassiveApi(`/vX/reference/financials`, { ticker: symbol, limit: '4' });
+            break;
+          }
+
+          case "ticker_details": {
+            result = await callMassiveApi(`/v3/reference/tickers/${symbol}`);
+            break;
           }
         }
 
-        return `❌ Error performing web search: ${error instanceof Error ? error.message : "Unknown error"
-          }`;
+        // Track API call
+        await track('Massive API Call', {
+          toolType: 'massiveSearch',
+          symbol,
+          dataType,
+        });
+
+        return JSON.stringify({
+          type: "massive_data",
+          symbol,
+          dataType,
+          data: result,
+        }, null, 2);
+
+      } catch (error) {
+        if (error instanceof Error) {
+          if (error.message.includes('not configured')) {
+            return `🔐 ${error.message}. Please set up your Massive API key.`;
+          }
+          if (error.message.includes('rate limit') || error.message.includes('429')) {
+            return "⏱️ Rate limit exceeded. Please try again in a moment.";
+          }
+        }
+        return `❌ Error fetching Massive data: ${error instanceof Error ? error.message : "Unknown error"}`;
       }
     },
   }),
