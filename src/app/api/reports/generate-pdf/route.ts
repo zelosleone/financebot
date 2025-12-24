@@ -90,8 +90,8 @@ export async function POST(request: NextRequest) {
       if (!content || !Array.isArray(content)) continue;
 
       // Accumulate processing time from assistant messages
-      if (message.processing_time_ms) {
-        totalProcessingTimeMs += message.processing_time_ms;
+      if (message.processingTimeMs) {
+        totalProcessingTimeMs += message.processingTimeMs;
       }
 
       for (const part of content) {
@@ -189,7 +189,7 @@ export async function POST(request: NextRequest) {
         // Create CSV data object
         const csvDataObj: CSVData = {
           title: csvData.title || 'Table',
-          description: csvData.description,
+          description: csvData.description ?? undefined,
           headers: parsedHeaders,
           rows: parsedRows,
         };

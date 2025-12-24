@@ -75,8 +75,8 @@ export function Sidebar({
         if (response.ok) {
           const payload = await response.json();
           const normalized = (payload.sessions || [])
-            .map(normalizeCachedSession)
-            .filter((session): session is CachedSession => !!session);
+            .map((s: any) => normalizeCachedSession(s))
+            .filter((session: CachedSession | null): session is CachedSession => !!session);
           if (normalized.length > 0) {
             saveCachedSessions(normalized);
           }

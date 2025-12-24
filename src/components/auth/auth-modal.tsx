@@ -19,7 +19,7 @@ interface AuthModalProps {
 }
 
 export function AuthModal({ open, onClose, onSignUpSuccess }: AuthModalProps) {
-  const signInWithValyu = useAuthStore((state) => state.signInWithValyu);
+  // Local-only mode: no actual sign-in needed
   const authLoading = useAuthStore((state) => state.loading);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,36 +34,11 @@ export function AuthModal({ open, onClose, onSignUpSuccess }: AuthModalProps) {
   }, [open]);
 
   const handleValyuSignIn = async () => {
-    setLoading(true);
-    setError(null);
-
-    // Track sign in button click
+    // Local-only mode: just close the modal, user is already "signed in"
     track('Valyu Sign In Clicked', {
       step: 'initiate',
     });
-
-    try {
-      const { error } = await signInWithValyu();
-      if (error) {
-        setError(error.message || 'Failed to initiate sign in');
-        setLoading(false);
-        // Track sign in error
-        track('Valyu Sign In Error', {
-          step: 'initiate',
-          error: error.message || 'Failed to initiate sign in',
-        });
-      }
-      // Don't close here as OAuth will redirect
-      // Don't set loading false here as user will be redirected
-    } catch (err) {
-      setError('An unexpected error occurred');
-      setLoading(false);
-      // Track unexpected error
-      track('Valyu Sign In Error', {
-        step: 'initiate',
-        error: 'unexpected_error',
-      });
-    }
+    onClose();
   };
 
   const isLoading = loading || authLoading;
