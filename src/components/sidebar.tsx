@@ -22,7 +22,6 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { SettingsModal } from '@/components/user/settings-modal';
-import { EnterpriseContactModal } from '@/components/enterprise/enterprise-contact-modal';
 
 interface SidebarProps {
   currentSessionId?: string;
@@ -58,7 +57,6 @@ export function Sidebar({
   const [showHistory, setShowHistory] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const [showEnterpriseModal, setShowEnterpriseModal] = useState(false);
 
   // Fetch chat sessions
   const { data: sessions = [], isLoading: loadingSessions } = useQuery({
@@ -339,21 +337,6 @@ export function Sidebar({
                 </div>
               )}
 
-              {/* Enterprise */}
-              {user && process.env.NEXT_PUBLIC_APP_MODE !== 'development' && process.env.NEXT_PUBLIC_ENTERPRISE === 'true' && (
-                <div className="relative group/tooltip">
-                  <button
-                    onClick={() => setShowEnterpriseModal(true)}
-                    className="w-12 h-12 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-800 rounded-[20px] transition-all duration-200 group hover:scale-110 active:scale-95"
-                  >
-                    <Building2 className="h-6 w-6 text-gray-600 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-100 transition-colors" />
-                  </button>
-                  <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium rounded-lg opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50">
-                    Enterprise Solutions
-                  </div>
-                </div>
-              )}
-
               {/* Settings */}
               {user && (
                 <div className="relative group/tooltip">
@@ -596,11 +579,6 @@ export function Sidebar({
       <SettingsModal
         open={showSettings}
         onClose={() => setShowSettings(false)}
-      />
-
-      <EnterpriseContactModal
-        open={showEnterpriseModal}
-        onClose={() => setShowEnterpriseModal(false)}
       />
     </>
   );

@@ -18,7 +18,6 @@ import { AuthModal } from '@/components/auth/auth-modal';
 import { useAuthStore } from '@/lib/stores/use-auth-store';
 import { Sidebar } from '@/components/sidebar';
 import { SignupPrompt } from '@/components/signup-prompt';
-import { EnterpriseBanner } from '@/components/enterprise/enterprise-banner';
 
 function HomeContent() {
   const { user, loading } = useAuthStore();
@@ -235,9 +234,6 @@ function HomeContent() {
 
   return (
     <div className='min-h-screen bg-[#F5F5F5] dark:bg-gray-950 flex'>
-      {/* Enterprise Banner */}
-      <EnterpriseBanner />
-
       {/* Notification Toast */}
       <AnimatePresence>
         {notification && (
