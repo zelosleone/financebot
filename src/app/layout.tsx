@@ -26,24 +26,24 @@ export const metadata: Metadata = {
     process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
   ),
   title: {
-    default: "FinanceBot",
-    template: "%s | FinanceBot",
+    default: "Finance by Valyu",
+    template: "%s | Finance by Valyu",
   },
   description:
-    "AI financial analysis with real-time data, secure Python execution, and interactive visualizations for research and reporting.",
-  applicationName: "FinanceBot",
+    "Powered by Valyu's enterprise-grade search infrastructure. AI financial analysis with real-time data, secure Python execution, and interactive visualizations for research and reporting.",
+  applicationName: "Finance by Valyu",
   openGraph: {
-    title: "FinanceBot",
+    title: "Finance by Valyu",
     description:
-      "AI financial analysis with real-time data, secure Python execution, and interactive visualizations.",
+      "Powered by Valyu's enterprise-grade search infrastructure. AI financial analysis with real-time data, secure Python execution, and interactive visualizations.",
     url: "/",
-    siteName: "FinanceBot",
+    siteName: "Finance by Valyu",
     images: [
       {
         url: "/valyu.png",
         width: 1200,
         height: 630,
-        alt: "FinanceBot",
+        alt: "Finance by Valyu",
       },
     ],
     locale: "en_US",
@@ -51,9 +51,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "FinanceBot",
+    title: "Finance by Valyu",
     description:
-      "AI-powered financial analysis with real-time data, secure Python execution, and interactive visualizations for research and reporting.",
+      "AI-powered financial analysis by Valyu. Real-time data, secure Python execution in Daytona sandboxes, and interactive visualizations for research and reporting.",
     images: ["/valyu.png"],
   },
   icons: {
@@ -70,7 +70,7 @@ export default function RootLayout({
   if (typeof window === 'undefined') {
     logEnvironmentStatus();
   }
-
+  
   return (
     <html lang="en" suppressHydrationWarning>
       <body

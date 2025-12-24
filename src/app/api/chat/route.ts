@@ -13,7 +13,7 @@ export const maxDuration = 800;
 
 export async function POST(req: Request) {
   try {
-    const { messages, sessionId }: { messages: FinanceUIMessage[], sessionId?: string } = await req.json();
+    const { messages, sessionId, valyuAccessToken }: { messages: FinanceUIMessage[], sessionId?: string, valyuAccessToken?: string } = await req.json();
     console.log("[Chat API] ========== NEW REQUEST ==========");
     console.log("[Chat API] Received sessionId:", sessionId);
     console.log("[Chat API] Number of messages:", messages.length);
@@ -26,7 +26,26 @@ export async function POST(req: Request) {
     const { data: { user } } = await db.getUser();
     console.log("[Chat API] Authenticated user:", user?.id || 'anonymous');
 
-    // App works without authentication - no login required
+    // REQUIRE VALYU AUTHENTICATION in production mode
+    // Users must sign in with Valyu to use the app - credits are handled by Valyu
+    if (!isDevelopment && !valyuAccessToken) {
+      console.log("[Chat API] No Valyu token - authentication required");
+      return new Response(
+        JSON.stringify({
+          error: "AUTH_REQUIRED",
+          message: "Sign in with Valyu to continue. Get $10 free credits on signup!",
+        }),
+        {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    // Log Valyu token status
+    if (valyuAccessToken) {
+      console.log("[Chat API] Valyu access token present (for API proxy)");
+    }
 
     // Legacy Supabase clients (only used in production mode for user data)
     let supabase: any = null;
@@ -171,15 +190,16 @@ export async function POST(req: Request) {
         modelInfo = `Zhipu AI GLM (${glmModel}) - Production Mode`;
       } else if (hasOpenAIKey) {
         selectedModel = openai("gpt-5");
-        modelInfo = "OpenAI (gpt-5) - Production Mode";
+        modelInfo = "OpenAI (gpt-5) - Production Mode (Valyu Credits)";
       } else {
         selectedModel = "openai/gpt-5";
-        modelInfo = 'Vercel AI Gateway ("gpt-5") - Production Mode';
+        modelInfo = 'Vercel AI Gateway ("gpt-5") - Production Mode (Valyu Credits)';
       }
     }
 
     console.log("[Chat API] Model selected:", modelInfo);
 
+    // Note: Valyu API billing is handled by the OAuth proxy when tools call Valyu APIs
 
     // Track processing start time
     const processingStartTime = Date.now();
@@ -259,6 +279,7 @@ export async function POST(req: Request) {
       experimental_context: {
         userId: user?.id,
         sessionId,
+        valyuAccessToken, // Pass Valyu OAuth token for API proxy calls
       },
       providerOptions,
       system: `You are a helpful assistant with access to comprehensive tools for Python code execution, financial data, web search, academic research, and data visualization.
@@ -586,8 +607,8 @@ export async function POST(req: Request) {
               content: contentToSave,
               processing_time_ms:
                 message.role === 'assistant' &&
-                  index === allMessages.length - 1 &&
-                  processingTimeMs !== undefined
+                index === allMessages.length - 1 &&
+                processingTimeMs !== undefined
                   ? processingTimeMs
                   : undefined,
             };
@@ -636,7 +657,7 @@ export async function POST(req: Request) {
 
     // Check if it's a tool/function calling compatibility error
     const isToolError = errorMessage.toLowerCase().includes('tool') ||
-      errorMessage.toLowerCase().includes('function');
+                       errorMessage.toLowerCase().includes('function');
     const isThinkingError = errorMessage.toLowerCase().includes('thinking');
 
     // Log full error details for debugging
