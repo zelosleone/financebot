@@ -18,6 +18,7 @@ export default function PrivacyPolicy() {
               <li>Account information (email, name)</li>
               <li>Usage data and analytics</li>
               <li>Chat messages and interactions</li>
+              <li>Local browser storage identifiers (cookies/local storage)</li>
               <li>Payment information (processed by third parties)</li>
             </ul>
           </section>
@@ -28,7 +29,7 @@ export default function PrivacyPolicy() {
               <li>To provide and improve our services</li>
               <li>To process queries through OpenAI GPT-5 and Valyu API</li>
               <li>To execute code through Daytona services</li>
-              <li>To authenticate users via Supabase Auth</li>
+              <li>To store chat history locally in your browser</li>
               <li>To process payments and billing</li>
             </ul>
           </section>
@@ -42,7 +43,6 @@ export default function PrivacyPolicy() {
               <li>OpenAI (for AI processing)</li>
               <li>Valyu API (for search functionality)</li>
               <li>Daytona (for code execution)</li>
-              <li>Supabase (for authentication and database)</li>
               <li>Payment processors (for billing)</li>
             </ul>
           </section>

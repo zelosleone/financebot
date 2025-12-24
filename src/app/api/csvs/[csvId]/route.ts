@@ -20,7 +20,7 @@ export async function GET(
       );
     }
 
-    // Fetch CSV from database (works with both Supabase and local SQLite)
+    // Fetch CSV from local database
     const { data: csvData, error } = await db.getCSV(csvId);
 
     if (error || !csvData) {

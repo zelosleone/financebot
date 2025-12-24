@@ -6,7 +6,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import BottomBar from '@/components/bottom-bar';
 import Image from 'next/image';
 import { track } from '@vercel/analytics';
-import { createClient } from '@/utils/supabase/client';
 import { Button } from '@/components/ui/button';
 import {
   CheckCircle,
@@ -14,7 +13,6 @@ import {
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { AuthModal } from '@/components/auth/auth-modal';
 import { useAuthStore } from '@/lib/stores/use-auth-store';
 import { Sidebar } from '@/components/sidebar';
 import { SignupPrompt } from '@/components/signup-prompt';
@@ -28,12 +26,12 @@ function HomeContent() {
   const [isHoveringTitle, setIsHoveringTitle] = useState(false);
   const [autoTiltTriggered, setAutoTiltTriggered] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  
+
   // Get chatId from URL params
   const chatIdParam = searchParams.get('chatId');
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>(chatIdParam || undefined);
   const [chatKey, setChatKey] = useState(0); // Force remount key
-  
+
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [messageCount, setMessageCount] = useState(0);
@@ -80,57 +78,7 @@ function HomeContent() {
       router.replace('/'); // Remove URL params
     }
 
-    // Handle checkout success
-    const checkoutSuccess = searchParams.get('checkout');
-    const checkoutPlan = searchParams.get('plan');
-    const customerSessionToken = searchParams.get('customer_session_token');
-
-    if (checkoutSuccess === 'success' && checkoutPlan && customerSessionToken && user) {
-      
-      // Call our checkout success API
-      const processCheckout = async () => {
-        try {
-          const supabase = createClient();
-          const { data: { session } } = await supabase.auth.getSession();
-          
-          const response = await fetch('/api/checkout/success', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${session?.access_token}`
-            },
-            body: JSON.stringify({
-              customerSessionToken,
-              plan: checkoutPlan
-            })
-          });
-
-          const result = await response.json();
-
-          if (response.ok) {
-            setNotification({ 
-              type: 'success', 
-              message: `Successfully upgraded to ${checkoutPlan} plan! You can now use the service.` 
-            });
-            // Refresh auth state to update subscription tier
-            window.location.reload();
-          } else {
-            setNotification({ 
-              type: 'error', 
-              message: `Failed to complete upgrade: ${result.error || 'Unknown error'}` 
-            });
-          }
-        } catch (error) {
-          setNotification({ 
-            type: 'error', 
-            message: 'Failed to process checkout. Please contact support.' 
-          });
-        }
-      };
-
-      processCheckout();
-      router.replace('/'); // Remove checkout params from URL
-    }
+    // Checkout handling removed - no subscription system
 
     // Auto-hide notifications after 5 seconds
     if (notification) {
@@ -144,14 +92,14 @@ function HomeContent() {
   // Detect mobile device for touch interactions
   useEffect(() => {
     const checkMobile = () => {
-      const isMobileDevice = window.innerWidth <= 768 || 
+      const isMobileDevice = window.innerWidth <= 768 ||
         /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
       setIsMobile(isMobileDevice);
     };
-    
+
     checkMobile();
     window.addEventListener('resize', checkMobile);
-    
+
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
@@ -169,7 +117,7 @@ function HomeContent() {
     }
   }, [isMobile]);
 
-  
+
   // Auto-trigger tilt animation after 2 seconds
   useEffect(() => {
     if (!hasMessages && !autoTiltTriggered) {
@@ -179,13 +127,13 @@ function HomeContent() {
         });
         setIsHoveringTitle(true);
         setAutoTiltTriggered(true);
-        
+
         // Keep it tilted for 2 seconds then close
         setTimeout(() => {
           setIsHoveringTitle(false);
         }, 2000);
       }, 2000);
-      
+
       return () => clearTimeout(timer);
     }
   }, [hasMessages, autoTiltTriggered]);
@@ -243,11 +191,10 @@ function HomeContent() {
             exit={{ opacity: 0, y: -50 }}
             className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50"
           >
-            <div className={`flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg text-sm font-medium ${
-              notification.type === 'success'
-                ? 'bg-green-50 text-green-800 border border-green-200'
-                : 'bg-red-50 text-red-800 border border-red-200'
-            }`}>
+            <div className={`flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg text-sm font-medium ${notification.type === 'success'
+              ? 'bg-green-50 text-green-800 border border-green-200'
+              : 'bg-red-50 text-red-800 border border-red-200'
+              }`}>
               {notification.type === 'success' ? (
                 <CheckCircle className="h-4 w-4" />
               ) : (
@@ -271,15 +218,15 @@ function HomeContent() {
       <div className="flex-1 flex flex-col pt-0">
         {/* Header - Animate out when messages appear */}
         <AnimatePresence mode="wait">
-            {!hasMessages && (
-              <motion.div 
-                className="text-center pt-12 sm:pt-16 pb-6 sm:pb-4 px-4 sm:px-0"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20, transition: { duration: 0.3 } }}
-                transition={{ duration: 0.6, ease: "easeOut" }}
-              >
-              <motion.div 
+          {!hasMessages && (
+            <motion.div
+              className="text-center pt-12 sm:pt-16 pb-6 sm:pb-4 px-4 sm:px-0"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20, transition: { duration: 0.3 } }}
+              transition={{ duration: 0.6, ease: "easeOut" }}
+            >
+              <motion.div
                 className="relative mb-10 inline-block"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -299,42 +246,41 @@ function HomeContent() {
                 }}
                 onClick={handleTitleClick}
               >
-                <motion.h1 
-                  className={`text-4xl sm:text-5xl font-light text-gray-900 dark:text-gray-100 tracking-tight relative z-10 ${
-                    isMobile ? 'cursor-pointer' : 'cursor-default'
-                  }`}
+                <motion.h1
+                  className={`text-4xl sm:text-5xl font-light text-gray-900 dark:text-gray-100 tracking-tight relative z-10 ${isMobile ? 'cursor-pointer' : 'cursor-default'
+                    }`}
                   style={{ transformOrigin: '15% 100%' }}
-                  animate={{ 
+                  animate={{
                     rotateZ: isHoveringTitle ? -8 : 0,
                   }}
                   transition={{ duration: 0.3, ease: [0.23, 1, 0.32, 1] }}
                 >
                   Finance
                 </motion.h1>
-                
+
                 {/* "By Valyu" that slides out from under */}
-                <motion.div 
+                <motion.div
                   className="absolute -bottom-6 left-0 right-0 flex items-center justify-center gap-1"
                   initial={{ opacity: 0 }}
-                  animate={{ 
+                  animate={{
                     opacity: isHoveringTitle ? 1 : 0,
                     y: isHoveringTitle ? 0 : -10,
                   }}
-                  transition={{ 
+                  transition={{
                     opacity: { delay: isHoveringTitle ? 0.15 : 0, duration: 0.2 },
                     y: { delay: isHoveringTitle ? 0.1 : 0, duration: 0.3, ease: [0.23, 1, 0.32, 1] }
                   }}
                 >
                   <span className="text-sm text-gray-500 dark:text-gray-400 font-light">By</span>
-                  <Image 
-                    src="/valyu.svg" 
-                    alt="Valyu" 
+                  <Image
+                    src="/valyu.svg"
+                    alt="Valyu"
                     width={60}
                     height={60}
                     className="h-5 opacity-80 dark:invert"
                   />
                 </motion.div>
-                
+
                 {/* Mobile tap hint */}
                 {isMobile && !isHoveringTitle && !hasMessages && (
                   <motion.div
@@ -353,7 +299,7 @@ function HomeContent() {
                 {/* Hover area extender */}
                 <div className="absolute inset-0 -bottom-10" />
               </motion.div>
-              <motion.p 
+              <motion.p
                 className="text-gray-500 dark:text-gray-400 text-xs sm:text-sm max-w-md mx-auto"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -364,9 +310,9 @@ function HomeContent() {
             </motion.div>
           )}
         </AnimatePresence>
-        
+
         {/* Chat Interface */}
-        <motion.div 
+        <motion.div
           className="flex-1 px-0 sm:px-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -382,15 +328,11 @@ function HomeContent() {
             />
           </Suspense>
         </motion.div>
-        
+
         <BottomBar />
       </div>
-      
-      {/* Auth Modal */}
-      <AuthModal
-        open={showAuthModal}
-        onClose={() => setShowAuthModal(false)}
-      />
+
+
 
       {/* Signup Prompt for non-logged-in users */}
       {!user && (

@@ -20,7 +20,7 @@ export async function GET(req: Request) {
     });
   }
 
-  // Normalize field names (SQLite uses camelCase, Supabase uses snake_case)
+  // Normalize field names for client consistency
   const normalizedSessions = sessions?.map((s: any) => ({
     id: s.id,
     title: s.title,

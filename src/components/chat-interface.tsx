@@ -14,10 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { useLocalProvider } from "@/lib/ollama-context";
 import { useAuthStore } from "@/lib/stores/use-auth-store";
-// useSubscription removed - Valyu OAuth handles billing
-import { createClient } from '@/utils/supabase/client-wrapper';
 import { track } from '@vercel/analytics';
-import { AuthModal } from '@/components/auth/auth-modal';
 import { ModelCompatibilityDialog } from '@/components/model-compatibility-dialog';
 
 import {
@@ -91,6 +88,13 @@ import DataSourceLogos from "./data-source-logos";
 import SocialLinks from "./social-links";
 import { calculateMessageMetrics, MessageMetrics } from "@/lib/metrics-calculator";
 import { MetricsPills } from "@/components/metrics-pills";
+import {
+  loadCachedMessages,
+  normalizeCachedSession,
+  saveCachedMessages,
+  touchCachedSession,
+  upsertCachedSession,
+} from "@/lib/chat-cache";
 
 // Debug toggles removed per request
 
@@ -136,11 +140,9 @@ const TimelineStep = memo(({
     <div className="group relative py-0.5 animate-in fade-in duration-200">
       {/* Minimal, refined design */}
       <div
-        className={`relative flex items-start gap-4 py-4 px-3 sm:px-4 -mx-1 sm:-mx-2 rounded-md transition-all duration-150 ${
-          isStreaming ? 'bg-blue-50/50 dark:bg-blue-950/10' : ''
-        } ${
-          hasContent ? 'hover:bg-gray-50 dark:hover:bg-white/[0.02] cursor-pointer' : ''
-        }`}
+        className={`relative flex items-start gap-4 py-4 px-3 sm:px-4 -mx-1 sm:-mx-2 rounded-md transition-all duration-150 ${isStreaming ? 'bg-blue-50/50 dark:bg-blue-950/10' : ''
+          } ${hasContent ? 'hover:bg-gray-50 dark:hover:bg-white/[0.02] cursor-pointer' : ''
+          }`}
         onClick={hasContent ? toggleExpand : undefined}
       >
         {/* Minimal status indicator */}
@@ -165,9 +167,8 @@ const TimelineStep = memo(({
 
         {/* Clean icon */}
         {icon && (
-          <div className={`flex-shrink-0 w-4 h-4 ${
-            isStreaming ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-500'
-          }`}>
+          <div className={`flex-shrink-0 w-4 h-4 ${isStreaming ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-500'
+            }`}>
             {icon}
           </div>
         )}
@@ -188,9 +189,8 @@ const TimelineStep = memo(({
 
         {/* Minimal chevron */}
         {hasContent && !isStreaming && (
-          <ChevronDown className={`h-3.5 w-3.5 text-gray-400 dark:text-gray-600 flex-shrink-0 transition-transform duration-150 ${
-            isExpanded ? 'rotate-180' : ''
-          }`} />
+          <ChevronDown className={`h-3.5 w-3.5 text-gray-400 dark:text-gray-600 flex-shrink-0 transition-transform duration-150 ${isExpanded ? 'rotate-180' : ''
+            }`} />
         )}
       </div>
 
@@ -796,58 +796,58 @@ const MemoizedTextPartWithCitations = memo(
             const p = parts[i];
 
 
-        // Check for search tool results - handle both live streaming and saved message formats
-        // Live: p.type = "tool-financialSearch", Saved: p.type = "tool-result" with toolName
-        const isSearchTool =
-          p.type === "tool-financialSearch" ||
-          p.type === "tool-webSearch" ||
-          p.type === "tool-wileySearch" ||
-          (p.type === "tool-result" && (
-            p.toolName === "financialSearch" ||
-            p.toolName === "webSearch" ||
-            p.toolName === "wileySearch"
-          ));
+            // Check for search tool results - handle both live streaming and saved message formats
+            // Live: p.type = "tool-financialSearch", Saved: p.type = "tool-result" with toolName
+            const isSearchTool =
+              p.type === "tool-financialSearch" ||
+              p.type === "tool-webSearch" ||
+              p.type === "tool-wileySearch" ||
+              (p.type === "tool-result" && (
+                p.toolName === "financialSearch" ||
+                p.toolName === "webSearch" ||
+                p.toolName === "wileySearch"
+              ));
 
-        if (isSearchTool && (p.output || p.result)) {
-          try {
-            const output = typeof p.output === "string" ? JSON.parse(p.output) :
-                          typeof p.result === "string" ? JSON.parse(p.result) :
-                          p.output || p.result;
+            if (isSearchTool && (p.output || p.result)) {
+              try {
+                const output = typeof p.output === "string" ? JSON.parse(p.output) :
+                  typeof p.result === "string" ? JSON.parse(p.result) :
+                    p.output || p.result;
 
-            // Check if this is a search result with multiple items
-            if (output.results && Array.isArray(output.results)) {
-              output.results.forEach((item: any) => {
-                const key = `[${citationNumber}]`;
-                let description = item.content || item.summary || item.description || "";
-                if (typeof description === "object") {
-                  description = JSON.stringify(description);
+                // Check if this is a search result with multiple items
+                if (output.results && Array.isArray(output.results)) {
+                  output.results.forEach((item: any) => {
+                    const key = `[${citationNumber}]`;
+                    let description = item.content || item.summary || item.description || "";
+                    if (typeof description === "object") {
+                      description = JSON.stringify(description);
+                    }
+                    citationMap[key] = [
+                      {
+                        number: citationNumber.toString(),
+                        title: item.title || `Source ${citationNumber}`,
+                        url: item.url || "",
+                        description: description,
+                        source: item.source,
+                        date: item.date,
+                        authors: Array.isArray(item.authors) ? item.authors : [],
+                        doi: item.doi,
+                        relevanceScore: item.relevanceScore || item.relevance_score,
+                        toolType:
+                          p.type === "tool-financialSearch" || p.toolName === "financialSearch"
+                            ? "financial"
+                            : p.type === "tool-wileySearch" || p.toolName === "wileySearch"
+                              ? "wiley"
+                              : "web",
+                      },
+                    ];
+                    citationNumber++;
+                  });
                 }
-                citationMap[key] = [
-                  {
-                    number: citationNumber.toString(),
-                    title: item.title || `Source ${citationNumber}`,
-                    url: item.url || "",
-                    description: description,
-                    source: item.source,
-                    date: item.date,
-                    authors: Array.isArray(item.authors) ? item.authors : [],
-                    doi: item.doi,
-                    relevanceScore: item.relevanceScore || item.relevance_score,
-                    toolType:
-                      p.type === "tool-financialSearch" || p.toolName === "financialSearch"
-                        ? "financial"
-                        : p.type === "tool-wileySearch" || p.toolName === "wileySearch"
-                        ? "wiley"
-                        : "web",
-                  },
-                ];
-                citationNumber++;
-              });
+              } catch (error) {
+                // Ignore parse errors
+              }
             }
-          } catch (error) {
-            // Ignore parse errors
-          }
-        }
           }
         }
       } else {
@@ -868,8 +868,8 @@ const MemoizedTextPartWithCitations = memo(
           if (isSearchTool && (p.output || p.result)) {
             try {
               const output = typeof p.output === "string" ? JSON.parse(p.output) :
-                            typeof p.result === "string" ? JSON.parse(p.result) :
-                            p.output || p.result;
+                typeof p.result === "string" ? JSON.parse(p.result) :
+                  p.output || p.result;
 
               if (output.results && Array.isArray(output.results)) {
                 output.results.forEach((item: any) => {
@@ -893,8 +893,8 @@ const MemoizedTextPartWithCitations = memo(
                         p.type === "tool-financialSearch" || p.toolName === "financialSearch"
                           ? "financial"
                           : p.type === "tool-wileySearch" || p.toolName === "wileySearch"
-                          ? "wiley"
-                          : "web",
+                            ? "wiley"
+                            : "web",
                     },
                   ];
                   citationNumber++;
@@ -947,9 +947,8 @@ const extractSearchResults = (jsonOutput: string) => {
               ? result.content.substring(0, 150) + "..."
               : result.content
             : typeof result.content === "number"
-            ? `Current Price: $${result.content.toFixed(2)}`
-            : `${
-                result.dataType === "structured" ? "Structured data" : "Data"
+              ? `Current Price: $${result.content.toFixed(2)}`
+              : `${result.dataType === "structured" ? "Structured data" : "Data"
               } from ${result.source || "source"}`
           : "No summary available",
         source: result.source || "Unknown source",
@@ -1068,11 +1067,10 @@ const SearchResultCard = ({
                 {/* Metadata badges */}
                 <div className="flex items-center gap-1.5 mt-auto">
                   <span
-                    className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                      result.isStructured
-                        ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
-                        : "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
-                    }`}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${result.isStructured
+                      ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+                      : "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
+                      }`}
                   >
                     {result.dataType}
                   </span>
@@ -1151,11 +1149,10 @@ const SearchResultCard = ({
                 {/* Metadata badges */}
                 <div className="flex items-center gap-1.5 mt-auto">
                   <span
-                    className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                      result.isStructured
-                        ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
-                        : "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
-                    }`}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${result.isStructured
+                      ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300"
+                      : "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
+                      }`}
                   >
                     {result.dataType}
                   </span>
@@ -1195,7 +1192,7 @@ const SearchResultCard = ({
                 </span>
               )}
             </div>
-            
+
             {type === "wiley" && (result.authors || result.citation) && (
               <div className="space-y-1">
                 {result.authors && result.authors.length > 0 && (
@@ -1319,10 +1316,10 @@ const SearchResultCard = ({
                     typeof result.fullContent === "string"
                       ? result.fullContent
                       : typeof result.fullContent === "number"
-                      ? `$${result.fullContent.toFixed(2)}`
-                      : typeof result.fullContent === "object"
-                      ? JSON.stringify(result.fullContent, null, 2)
-                      : String(result.fullContent || "No content available")
+                        ? `$${result.fullContent.toFixed(2)}`
+                        : typeof result.fullContent === "object"
+                          ? JSON.stringify(result.fullContent, null, 2)
+                          : String(result.fullContent || "No content available")
                   }
                 />
               </div>
@@ -1651,7 +1648,7 @@ export function ChatInterface({
   const generateSessionTitle = useCallback((firstMessage: string): string => {
     // Create a smart title from the first user message
     const cleaned = firstMessage.trim();
-    
+
     // Financial keywords to prioritize in titles
     const financialKeywords = [
       'stock', 'stocks', 'share', 'shares', 'equity', 'portfolio', 'investment', 'invest',
@@ -1661,88 +1658,87 @@ export function ChatInterface({
       'ipo', 'merger', 'acquisition', 'bonds', 'yield', 'interest', 'rate', 'fed', 'inflation',
       'gdp', 'recession', 'bull', 'bear', 'volatility', 'risk', 'return'
     ];
-    
+
     // Company/ticker patterns
     const tickerPattern = /\b[A-Z]{1,5}\b/g;
     const dollarPattern = /\$[A-Z]{1,5}\b/g;
-    
+
     // Extract potential tickers or companies mentioned
     const tickers = [...(cleaned.match(tickerPattern) || []), ...(cleaned.match(dollarPattern) || [])];
-    
+
     if (cleaned.length <= 50) {
       return cleaned;
     }
-    
+
     // Try to find a sentence with financial context
     const sentences = cleaned.split(/[.!?]+/);
     for (const sentence of sentences) {
       const trimmed = sentence.trim();
       if (trimmed.length > 10 && trimmed.length <= 50) {
         // Check if this sentence contains financial keywords or tickers
-        const hasFinancialContext = financialKeywords.some(keyword => 
+        const hasFinancialContext = financialKeywords.some(keyword =>
           trimmed.toLowerCase().includes(keyword.toLowerCase())
         ) || tickers.some(ticker => trimmed.includes(ticker));
-        
+
         if (hasFinancialContext) {
           return trimmed;
         }
       }
     }
-    
+
     // If we have tickers, try to create a title around them
     if (tickers.length > 0) {
       const firstTicker = tickers[0];
       const tickerIndex = cleaned.indexOf(firstTicker);
-      
+
       // Try to get context around the ticker
       const start = Math.max(0, tickerIndex - 20);
       const end = Math.min(cleaned.length, tickerIndex + firstTicker.length + 20);
       const context = cleaned.substring(start, end);
-      
+
       if (context.length <= 50) {
         return context.trim();
       }
     }
-    
+
     // Fall back to smart truncation
     const truncated = cleaned.substring(0, 47);
     const lastSpace = truncated.lastIndexOf(' ');
     const lastPeriod = truncated.lastIndexOf('.');
     const lastQuestion = truncated.lastIndexOf('?');
-    
+
     const breakPoint = Math.max(lastSpace, lastPeriod, lastQuestion);
     const title = breakPoint > 20 ? truncated.substring(0, breakPoint) : truncated;
-    
+
     return title + (title.endsWith('.') || title.endsWith('?') ? '' : '...');
   }, []);
 
   const createSession = useCallback(async (firstMessage: string): Promise<string | null> => {
     if (!user) return null;
-    
+
     try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      
       // Use fast fallback title initially
       const quickTitle = generateSessionTitle(firstMessage);
-      
+
       // Create session immediately with fallback title
       const response = await fetch('/api/chat/sessions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token}`
         },
         body: JSON.stringify({ title: quickTitle })
       });
 
       if (response.ok) {
         const { session: newSession } = await response.json();
-        
+        const cachedSession = normalizeCachedSession(newSession);
+        if (cachedSession) {
+          upsertCachedSession(cachedSession);
+        }
+
         // Generate better AI title in background (don't wait)
         const titleHeaders: Record<string, string> = {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token}`
         };
 
         // Add Ollama preference header if in development mode
@@ -1764,26 +1760,40 @@ export function ChatInterface({
             await fetch(`/api/chat/sessions/${newSession.id}`, {
               method: 'PATCH',
               headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${session?.access_token}`
+                'Content-Type': 'application/json'
               },
               body: JSON.stringify({ title: aiTitle })
             });
+            if (cachedSession) {
+              upsertCachedSession({
+                ...cachedSession,
+                title: aiTitle,
+                updated_at: new Date().toISOString(),
+              });
+            }
           }
         }).catch(() => {
         });
-        
+
         return newSession.id;
       }
+      const fallbackId = globalThis.crypto?.randomUUID
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now()}`;
+      upsertCachedSession({
+        id: fallbackId,
+        title: quickTitle,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        last_message_at: null,
+      });
+      return fallbackId;
     } catch (error) {
     }
     return null;
   }, [user, generateSessionTitle]);
 
   // Placeholder for loadSessionMessages - will be defined after useChat hook
-  
-  // Get Valyu access token for API proxy calls (with auto-refresh)
-  const getValidValyuAccessToken = useAuthStore((state) => state.getValidValyuAccessToken);
 
   const transport = useMemo(() =>
     new DefaultChatTransport({
@@ -1806,22 +1816,10 @@ export function ChatInterface({
           }
         }
 
-        if (user) {
-          const supabase = createClient();
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.access_token) {
-            headers['Authorization'] = `Bearer ${session.access_token}`;
-          }
-        }
-
-        // Get Valyu access token for API proxy calls (auto-refreshes if expired)
-        const valyuAccessToken = await getValidValyuAccessToken();
-
         return {
           body: {
             messages,
             sessionId: sessionIdRef.current,
-            valyuAccessToken, // Pass Valyu token for API proxy
           },
           headers,
         };
@@ -1866,57 +1864,81 @@ export function ChatInterface({
     },
   });
 
+  useEffect(() => {
+    if (!sessionIdRef.current || messages.length === 0) return;
+    saveCachedMessages(sessionIdRef.current, messages);
+    touchCachedSession(sessionIdRef.current);
+  }, [messages]);
+
 
   // Session loading function - defined after useChat to access setMessages
   const loadSessionMessages = useCallback(async (sessionId: string) => {
     if (!user) return;
-    
+
     setIsLoadingSession(true);
     try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      const response = await fetch(`/api/chat/sessions/${sessionId}`, {
-        headers: {
-          'Authorization': `Bearer ${session?.access_token}`
-        }
-      });
+      let sessionMessages: any[] | null = null;
+      let sessionData: any = null;
 
-      if (response.ok) {
-        const { messages: sessionMessages } = await response.json();
-        
-        // Convert session messages to the format expected by useChat
-        const convertedMessages = sessionMessages.map((msg: any) => ({
-          id: msg.id,
-          role: msg.role,
-          parts: msg.parts,
-          toolCalls: msg.toolCalls,
-          createdAt: msg.createdAt,
-          processing_time_ms: msg.processing_time_ms
-        }));
-        
-        // Set messages in the chat
-        setMessages(convertedMessages);
-        sessionIdRef.current = sessionId;
-        setCurrentSessionId(sessionId);
-        
-        // Move form to bottom when loading a session with messages
-        if (convertedMessages.length > 0) {
-          setIsFormAtBottom(true);
+      try {
+        const response = await fetch(`/api/chat/sessions/${sessionId}`);
+        if (response.ok) {
+          const payload = await response.json();
+          sessionMessages = payload.messages || [];
+          sessionData = payload.session;
         }
-        
-        // Scroll to bottom after loading messages
-        setTimeout(() => {
-          const c = messagesContainerRef.current;
-          if (c) {
-            c.scrollTo({ top: c.scrollHeight, behavior: 'smooth' });
-          }
-          // Also try the messagesEndRef as backup
-          setTimeout(() => {
-            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-          }, 100);
-        }, 500);
+      } catch {
+        // Network failures fall back to local cache
       }
+
+      const cachedMessages = loadCachedMessages(sessionId);
+      if (!sessionMessages || sessionMessages.length === 0) {
+        if (cachedMessages.length > 0) {
+          sessionMessages = cachedMessages;
+        } else {
+          sessionMessages = sessionMessages || [];
+        }
+      }
+
+      // Convert session messages to the format expected by useChat
+      const convertedMessages = sessionMessages.map((msg: any) => ({
+        id: msg.id,
+        role: msg.role,
+        parts: msg.parts,
+        toolCalls: msg.toolCalls,
+        createdAt: msg.createdAt,
+        processing_time_ms: msg.processing_time_ms
+      }));
+
+      // Set messages in the chat
+      setMessages(convertedMessages);
+      if (convertedMessages.length > 0) {
+        saveCachedMessages(sessionId, convertedMessages);
+      }
+      sessionIdRef.current = sessionId;
+      setCurrentSessionId(sessionId);
+
+      const cachedSession = sessionData ? normalizeCachedSession(sessionData) : null;
+      if (cachedSession) {
+        upsertCachedSession(cachedSession);
+      }
+
+      // Move form to bottom when loading a session with messages
+      if (convertedMessages.length > 0) {
+        setIsFormAtBottom(true);
+      }
+
+      // Scroll to bottom after loading messages
+      setTimeout(() => {
+        const c = messagesContainerRef.current;
+        if (c) {
+          c.scrollTo({ top: c.scrollHeight, behavior: 'smooth' });
+        }
+        // Also try the messagesEndRef as backup
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+      }, 500);
     } catch (error) {
     } finally {
       setIsLoadingSession(false);
@@ -1975,10 +1997,10 @@ export function ChatInterface({
         setIsFormAtBottom(true);
       }
     };
-    
+
     checkMobile();
     window.addEventListener('resize', checkMobile);
-    
+
     return () => window.removeEventListener('resize', checkMobile);
   }, []); // Empty dependency array - only run on mount
 
@@ -2180,7 +2202,7 @@ export function ChatInterface({
       updateVisibleRange();
     };
 
-    const handleWindowScroll = () => {};
+    const handleWindowScroll = () => { };
 
     // Handle wheel events to immediately detect scroll intent
     const handleWheel = (e: WheelEvent) => {
@@ -2369,9 +2391,9 @@ export function ChatInterface({
       messages.map((message) =>
         message.id === messageId
           ? {
-              ...message,
-              parts: [{ type: "text" as const, text: editingText }],
-            }
+            ...message,
+            parts: [{ type: "text" as const, text: editingText }],
+          }
           : message
       )
     );
@@ -2599,9 +2621,8 @@ export function ChatInterface({
       {/* Messages */}
       <div
         ref={messagesContainerRef}
-        className={`space-y-4 sm:space-y-8 min-h-[300px] overflow-y-auto overflow-x-hidden ${
-          messages.length > 0 ? "pt-20 sm:pt-24" : "pt-2 sm:pt-4"
-        } ${isFormAtBottom ? "pb-44 sm:pb-36" : "pb-4 sm:pb-8"}`}
+        className={`space-y-4 sm:space-y-8 min-h-[300px] overflow-y-auto overflow-x-hidden ${messages.length > 0 ? "pt-20 sm:pt-24" : "pt-2 sm:pt-4"
+          } ${isFormAtBottom ? "pb-44 sm:pb-36" : "pb-4 sm:pb-8"}`}
       >
         {messages.length === 0 && (
           <motion.div
@@ -2851,11 +2872,11 @@ export function ChatInterface({
         <AnimatePresence initial={!virtualizationEnabled}>
           {(virtualizationEnabled
             ? deferredMessages
-                .slice(visibleRange.start, visibleRange.end)
-                .map((message, i) => ({
-                  item: message,
-                  realIndex: visibleRange.start + i,
-                }))
+              .slice(visibleRange.start, visibleRange.end)
+              .map((message, i) => ({
+                item: message,
+                realIndex: visibleRange.start + i,
+              }))
             : deferredMessages.map((m, i) => ({ item: m, realIndex: i }))
           ).map(({ item: message, realIndex }) => (
             <motion.div
@@ -3032,11 +3053,11 @@ export function ChatInterface({
                         const displayParts = isTraceExpanded
                           ? groupedParts
                           : groupedParts.filter(g => {
-                              // Only show text parts when collapsed
-                              if (g.type === "reasoning-group") return false;
-                              if (g.part?.type?.startsWith("tool-")) return false;
-                              return g.part?.type === "text";
-                            });
+                            // Only show text parts when collapsed
+                            if (g.type === "reasoning-group") return false;
+                            if (g.part?.type?.startsWith("tool-")) return false;
+                            return g.part?.type === "text";
+                          });
 
                         return (
                           <>
@@ -3102,551 +3123,547 @@ export function ChatInterface({
                             )}
 
                             {displayParts.map((group, groupIndex) => {
-                          if (group.type === "reasoning-group") {
-                            // Render combined reasoning component
-                            const combinedText = group.parts
-                              .map((item: any) => item.part.text)
-                              .join("\n\n");
-                            const firstPart = group.parts[0].part;
-                            // Only show as streaming if THIS specific part is actively streaming
-                            const isStreaming = group.parts.some(
-                              (item: any) => item.part.state === "streaming"
-                            );
-
-                            // Extract latest **title** and lines after it for live preview
-                            let previewTitle = "";
-                            let previewLines: string[] = [];
-
-                            if (isStreaming && combinedText) {
-                              const allLines = combinedText.split('\n').filter((l: string) => l.trim());
-
-                              // Find the LATEST line that matches **text** pattern
-                              let lastTitleIndex = -1;
-                              for (let i = allLines.length - 1; i >= 0; i--) {
-                                if (allLines[i].match(/^\*\*.*\*\*$/)) {
-                                  lastTitleIndex = i;
-                                  previewTitle = allLines[i].replace(/\*\*/g, ''); // Remove ** markers
-                                  break;
-                                }
-                              }
-
-                              // Get all lines after the latest title
-                              if (lastTitleIndex !== -1 && lastTitleIndex < allLines.length - 1) {
-                                previewLines = allLines.slice(lastTitleIndex + 1);
-                              } else if (lastTitleIndex === -1 && allLines.length > 0) {
-                                // No title found, just use all lines
-                                previewLines = allLines;
-                              }
-                            }
-
-                            return (
-                              <React.Fragment key={`reasoning-group-${groupIndex}`}>
-                                <ReasoningComponent
-                                  part={{ ...firstPart, text: combinedText }}
-                                  messageId={message.id}
-                                  index={groupIndex}
-                                  status={isStreaming ? "streaming" : "complete"}
-                                  expandedTools={expandedTools}
-                                  toggleToolExpansion={toggleToolExpansion}
-                                />
-                                {isStreaming && previewLines.length > 0 && (
-                                  <LiveReasoningPreview
-                                    title={previewTitle}
-                                    lines={previewLines}
-                                  />
-                                )}
-                              </React.Fragment>
-                            );
-                          } else {
-                            // Render single part normally
-                            const { part, index } = group;
-
-                            switch (part.type) {
-                              // Skip step-start markers (metadata from AI SDK)
-                              case "step-start":
-                                return null;
-
-                              // Text parts
-                              case "text":
-                                // Use index directly instead of findIndex to avoid extra computation
-                                return (
-                                  <div
-                                    key={index}
-                                    className="prose prose-sm max-w-none dark:prose-invert"
-                                  >
-                                    <MemoizedTextPartWithCitations
-                                      text={part.text}
-                                      messageParts={message.parts}
-                                      currentPartIndex={index}
-                                      allMessages={deferredMessages}
-                                      currentMessageIndex={realIndex}
-                                    />
-                                  </div>
+                              if (group.type === "reasoning-group") {
+                                // Render combined reasoning component
+                                const combinedText = group.parts
+                                  .map((item: any) => item.part.text)
+                                  .join("\n\n");
+                                const firstPart = group.parts[0].part;
+                                // Only show as streaming if THIS specific part is actively streaming
+                                const isStreaming = group.parts.some(
+                                  (item: any) => item.part.state === "streaming"
                                 );
 
-                              // Skip individual reasoning parts as they're handled in groups
-                              case "reasoning":
-                                return null;
+                                // Extract latest **title** and lines after it for live preview
+                                let previewTitle = "";
+                                let previewLines: string[] = [];
 
-                              // Python Executor Tool
-                              case "tool-codeExecution": {
-                                const callId = part.toolCallId;
-                                const isStreaming = part.state === "input-streaming" || part.state === "input-available";
-                                const hasOutput = part.state === "output-available";
-                                const hasError = part.state === "output-error";
+                                if (isStreaming && combinedText) {
+                                  const allLines = combinedText.split('\n').filter((l: string) => l.trim());
 
-                                if (hasError) {
-                                  return (
-                                    <div key={callId}>
-                                      <TimelineStep
-                                        part={part}
-                                        messageId={message.id}
-                                        index={index}
-                                        status="error"
-                                        type="tool"
-                                        title="Python Execution Error"
-                                        subtitle={part.errorText}
-                                        icon={<AlertCircle />}
-                                        expandedTools={expandedTools}
-                                        toggleToolExpansion={toggleToolExpansion}
-                                      />
-                                    </div>
-                                  );
+                                  // Find the LATEST line that matches **text** pattern
+                                  let lastTitleIndex = -1;
+                                  for (let i = allLines.length - 1; i >= 0; i--) {
+                                    if (allLines[i].match(/^\*\*.*\*\*$/)) {
+                                      lastTitleIndex = i;
+                                      previewTitle = allLines[i].replace(/\*\*/g, ''); // Remove ** markers
+                                      break;
+                                    }
+                                  }
+
+                                  // Get all lines after the latest title
+                                  if (lastTitleIndex !== -1 && lastTitleIndex < allLines.length - 1) {
+                                    previewLines = allLines.slice(lastTitleIndex + 1);
+                                  } else if (lastTitleIndex === -1 && allLines.length > 0) {
+                                    // No title found, just use all lines
+                                    previewLines = allLines;
+                                  }
                                 }
 
-                                const description = part.input?.description || "Executed Python code";
-
                                 return (
-                                  <div key={callId}>
-                                    <TimelineStep
-                                      part={part}
+                                  <React.Fragment key={`reasoning-group-${groupIndex}`}>
+                                    <ReasoningComponent
+                                      part={{ ...firstPart, text: combinedText }}
                                       messageId={message.id}
-                                      index={index}
+                                      index={groupIndex}
                                       status={isStreaming ? "streaming" : "complete"}
-                                      type="tool"
-                                      title="Code & Output"
-                                      subtitle={description}
-                                      icon={<Code2 />}
                                       expandedTools={expandedTools}
                                       toggleToolExpansion={toggleToolExpansion}
-                                    >
-                                      {hasOutput && (
-                                        <MemoizedCodeExecutionResult
-                                          code={part.input?.code || ""}
-                                          output={part.output}
-                                          actionId={callId}
+                                    />
+                                    {isStreaming && previewLines.length > 0 && (
+                                      <LiveReasoningPreview
+                                        title={previewTitle}
+                                        lines={previewLines}
+                                      />
+                                    )}
+                                  </React.Fragment>
+                                );
+                              } else {
+                                // Render single part normally
+                                const { part, index } = group;
+
+                                switch (part.type) {
+                                  // Skip step-start markers (metadata from AI SDK)
+                                  case "step-start":
+                                    return null;
+
+                                  // Text parts
+                                  case "text":
+                                    // Use index directly instead of findIndex to avoid extra computation
+                                    return (
+                                      <div
+                                        key={index}
+                                        className="prose prose-sm max-w-none dark:prose-invert"
+                                      >
+                                        <MemoizedTextPartWithCitations
+                                          text={part.text}
+                                          messageParts={message.parts}
+                                          currentPartIndex={index}
+                                          allMessages={deferredMessages}
+                                          currentMessageIndex={realIndex}
+                                        />
+                                      </div>
+                                    );
+
+                                  // Skip individual reasoning parts as they're handled in groups
+                                  case "reasoning":
+                                    return null;
+
+                                  // Python Executor Tool
+                                  case "tool-codeExecution": {
+                                    const callId = part.toolCallId;
+                                    const isStreaming = part.state === "input-streaming" || part.state === "input-available";
+                                    const hasOutput = part.state === "output-available";
+                                    const hasError = part.state === "output-error";
+
+                                    if (hasError) {
+                                      return (
+                                        <div key={callId}>
+                                          <TimelineStep
+                                            part={part}
+                                            messageId={message.id}
+                                            index={index}
+                                            status="error"
+                                            type="tool"
+                                            title="Python Execution Error"
+                                            subtitle={part.errorText}
+                                            icon={<AlertCircle />}
+                                            expandedTools={expandedTools}
+                                            toggleToolExpansion={toggleToolExpansion}
+                                          />
+                                        </div>
+                                      );
+                                    }
+
+                                    const description = part.input?.description || "Executed Python code";
+
+                                    return (
+                                      <div key={callId}>
+                                        <TimelineStep
+                                          part={part}
+                                          messageId={message.id}
+                                          index={index}
+                                          status={isStreaming ? "streaming" : "complete"}
+                                          type="tool"
+                                          title="Code & Output"
+                                          subtitle={description}
+                                          icon={<Code2 />}
                                           expandedTools={expandedTools}
                                           toggleToolExpansion={toggleToolExpansion}
-                                        />
-                                      )}
-                                    </TimelineStep>
-                                  </div>
-                                );
-                              }
-
-                              // Financial Search Tool
-                              case "tool-financialSearch": {
-                                const callId = part.toolCallId;
-                                const isStreaming = part.state === "input-streaming" || part.state === "input-available";
-                                const hasResults = part.state === "output-available";
-                                const hasError = part.state === "output-error";
-
-                                if (hasError) {
-                                  return (
-                                    <div key={callId} className="my-1">
-                                      <TimelineStep
-                                        part={part}
-                                        messageId={message.id}
-                                        index={index}
-                                        status="error"
-                                        type="search"
-                                        title="Financial Search Error"
-                                        subtitle={part.errorText}
-                                        icon={<AlertCircle />}
-                                        expandedTools={expandedTools}
-                                        toggleToolExpansion={toggleToolExpansion}
-                                      />
-                                    </div>
-                                  );
-                                }
-
-                                const financialResults = hasResults ? extractSearchResults(part.output) : [];
-                                const query = part.input?.query || "";
-
-                                // Create favicon stack subtitle when complete
-                                let subtitleContent: React.ReactNode = query;
-                                if (!isStreaming && financialResults.length > 0) {
-                                  const displayResults = financialResults.slice(0, 5);
-                                  subtitleContent = (
-                                    <div className="flex flex-col gap-1">
-                                      <div className="text-xs text-gray-600 dark:text-gray-400">{query}</div>
-                                      <div className="flex items-center gap-2">
-                                        <div className="flex -space-x-2">
-                                          {displayResults.map((result: any, idx: number) => (
-                                            <div
-                                              key={idx}
-                                              className="w-5 h-5 rounded-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 flex items-center justify-center overflow-hidden"
-                                              style={{ zIndex: 5 - idx }}
-                                            >
-                                              <Favicon url={result.url} size={12} className="w-3 h-3" />
-                                            </div>
-                                          ))}
-                                        </div>
-                                        <span className="text-xs text-gray-600 dark:text-gray-400">
-                                          {financialResults.length} results
-                                        </span>
+                                        >
+                                          {hasOutput && (
+                                            <MemoizedCodeExecutionResult
+                                              code={part.input?.code || ""}
+                                              output={part.output}
+                                              actionId={callId}
+                                              expandedTools={expandedTools}
+                                              toggleToolExpansion={toggleToolExpansion}
+                                            />
+                                          )}
+                                        </TimelineStep>
                                       </div>
-                                    </div>
-                                  );
-                                }
+                                    );
+                                  }
 
-                                return (
-                                  <div key={callId}>
-                                    <div className="group relative py-0.5 animate-in fade-in duration-200">
-                                      <div
-                                        className={`relative flex items-start gap-4 py-4 px-4 -mx-2 rounded-md transition-all duration-150 ${
-                                          isStreaming ? 'bg-blue-50/50 dark:bg-blue-950/10' : ''
-                                        } ${
-                                          hasResults ? 'hover:bg-gray-50 dark:hover:bg-white/[0.02] cursor-pointer' : ''
-                                        }`}
-                                        onClick={hasResults ? () => toggleToolExpansion(`step-search-${message.id}-${index}`) : undefined}
-                                      >
-                                        {/* Status indicator */}
-                                        <div className="flex-shrink-0">
-                                          {!isStreaming ? (
-                                            <div className="w-4 h-4 rounded-full bg-emerald-500/15 dark:bg-emerald-500/25 flex items-center justify-center">
-                                              <Check className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-500 stroke-[2.5]" />
+                                  // Financial Search Tool
+                                  case "tool-financialSearch": {
+                                    const callId = part.toolCallId;
+                                    const isStreaming = part.state === "input-streaming" || part.state === "input-available";
+                                    const hasResults = part.state === "output-available";
+                                    const hasError = part.state === "output-error";
+
+                                    if (hasError) {
+                                      return (
+                                        <div key={callId} className="my-1">
+                                          <TimelineStep
+                                            part={part}
+                                            messageId={message.id}
+                                            index={index}
+                                            status="error"
+                                            type="search"
+                                            title="Financial Search Error"
+                                            subtitle={part.errorText}
+                                            icon={<AlertCircle />}
+                                            expandedTools={expandedTools}
+                                            toggleToolExpansion={toggleToolExpansion}
+                                          />
+                                        </div>
+                                      );
+                                    }
+
+                                    const financialResults = hasResults ? extractSearchResults(part.output) : [];
+                                    const query = part.input?.query || "";
+
+                                    // Create favicon stack subtitle when complete
+                                    let subtitleContent: React.ReactNode = query;
+                                    if (!isStreaming && financialResults.length > 0) {
+                                      const displayResults = financialResults.slice(0, 5);
+                                      subtitleContent = (
+                                        <div className="flex flex-col gap-1">
+                                          <div className="text-xs text-gray-600 dark:text-gray-400">{query}</div>
+                                          <div className="flex items-center gap-2">
+                                            <div className="flex -space-x-2">
+                                              {displayResults.map((result: any, idx: number) => (
+                                                <div
+                                                  key={idx}
+                                                  className="w-5 h-5 rounded-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 flex items-center justify-center overflow-hidden"
+                                                  style={{ zIndex: 5 - idx }}
+                                                >
+                                                  <Favicon url={result.url} size={12} className="w-3 h-3" />
+                                                </div>
+                                              ))}
                                             </div>
-                                          ) : (
-                                            <div className="relative w-4 h-4">
-                                              <div className="absolute inset-0 rounded-full border border-blue-300/40 dark:border-blue-700/40" />
-                                              <div className="absolute inset-0 rounded-full border border-transparent border-t-blue-500 dark:border-t-blue-400 animate-spin" />
+                                            <span className="text-xs text-gray-600 dark:text-gray-400">
+                                              {financialResults.length} results
+                                            </span>
+                                          </div>
+                                        </div>
+                                      );
+                                    }
+
+                                    return (
+                                      <div key={callId}>
+                                        <div className="group relative py-0.5 animate-in fade-in duration-200">
+                                          <div
+                                            className={`relative flex items-start gap-4 py-4 px-4 -mx-2 rounded-md transition-all duration-150 ${isStreaming ? 'bg-blue-50/50 dark:bg-blue-950/10' : ''
+                                              } ${hasResults ? 'hover:bg-gray-50 dark:hover:bg-white/[0.02] cursor-pointer' : ''
+                                              }`}
+                                            onClick={hasResults ? () => toggleToolExpansion(`step-search-${message.id}-${index}`) : undefined}
+                                          >
+                                            {/* Status indicator */}
+                                            <div className="flex-shrink-0">
+                                              {!isStreaming ? (
+                                                <div className="w-4 h-4 rounded-full bg-emerald-500/15 dark:bg-emerald-500/25 flex items-center justify-center">
+                                                  <Check className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-500 stroke-[2.5]" />
+                                                </div>
+                                              ) : (
+                                                <div className="relative w-4 h-4">
+                                                  <div className="absolute inset-0 rounded-full border border-blue-300/40 dark:border-blue-700/40" />
+                                                  <div className="absolute inset-0 rounded-full border border-transparent border-t-blue-500 dark:border-t-blue-400 animate-spin" />
+                                                </div>
+                                              )}
+                                            </div>
+
+                                            {/* Icon */}
+                                            <div className={`flex-shrink-0 w-4 h-4 ${isStreaming ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-500'
+                                              }`}>
+                                              <Search />
+                                            </div>
+
+                                            {/* Content */}
+                                            <div className="flex-1 min-w-0">
+                                              <div className="flex items-baseline gap-2 mb-1">
+                                                <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                                  Financial Search
+                                                </span>
+                                              </div>
+                                              {!isStreaming && financialResults.length > 0 && subtitleContent}
+                                              {isStreaming && <div className="text-xs text-gray-500 dark:text-gray-500 line-clamp-1 mt-0.5">{query}</div>}
+                                            </div>
+
+                                            {/* Chevron */}
+                                            {hasResults && !isStreaming && (
+                                              <ChevronDown className={`h-3.5 w-3.5 text-gray-400 dark:text-gray-600 flex-shrink-0 transition-transform duration-150 ${expandedTools.has(`step-search-${message.id}-${index}`) ? 'rotate-180' : ''
+                                                }`} />
+                                            )}
+                                          </div>
+
+                                          {/* Expanded content */}
+                                          {expandedTools.has(`step-search-${message.id}-${index}`) && hasResults && (
+                                            <div className="mt-1.5 ml-6 mr-2 animate-in fade-in duration-150">
+                                              <SearchResultsCarousel
+                                                results={financialResults}
+                                                type="financial"
+                                              />
                                             </div>
                                           )}
                                         </div>
-
-                                        {/* Icon */}
-                                        <div className={`flex-shrink-0 w-4 h-4 ${
-                                          isStreaming ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-500'
-                                        }`}>
-                                          <Search />
-                                        </div>
-
-                                        {/* Content */}
-                                        <div className="flex-1 min-w-0">
-                                          <div className="flex items-baseline gap-2 mb-1">
-                                            <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                                              Financial Search
-                                            </span>
-                                          </div>
-                                          {!isStreaming && financialResults.length > 0 && subtitleContent}
-                                          {isStreaming && <div className="text-xs text-gray-500 dark:text-gray-500 line-clamp-1 mt-0.5">{query}</div>}
-                                        </div>
-
-                                        {/* Chevron */}
-                                        {hasResults && !isStreaming && (
-                                          <ChevronDown className={`h-3.5 w-3.5 text-gray-400 dark:text-gray-600 flex-shrink-0 transition-transform duration-150 ${
-                                            expandedTools.has(`step-search-${message.id}-${index}`) ? 'rotate-180' : ''
-                                          }`} />
-                                        )}
                                       </div>
+                                    );
+                                  }
 
-                                      {/* Expanded content */}
-                                      {expandedTools.has(`step-search-${message.id}-${index}`) && hasResults && (
-                                        <div className="mt-1.5 ml-6 mr-2 animate-in fade-in duration-150">
-                                          <SearchResultsCarousel
-                                            results={financialResults}
-                                            type="financial"
+                                  // Web Search Tool
+                                  case "tool-webSearch": {
+                                    const callId = part.toolCallId;
+                                    const isStreaming = part.state === "input-streaming" || part.state === "input-available";
+                                    const hasResults = part.state === "output-available";
+                                    const hasError = part.state === "output-error";
+
+                                    if (hasError) {
+                                      return (
+                                        <div key={callId} className="my-1">
+                                          <TimelineStep
+                                            part={part}
+                                            messageId={message.id}
+                                            index={index}
+                                            status="error"
+                                            type="search"
+                                            title="Web Search Error"
+                                            subtitle={part.errorText}
+                                            icon={<AlertCircle />}
+                                            expandedTools={expandedTools}
+                                            toggleToolExpansion={toggleToolExpansion}
                                           />
                                         </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                );
-                              }
+                                      );
+                                    }
 
-                              // Web Search Tool
-                              case "tool-webSearch": {
-                                const callId = part.toolCallId;
-                                const isStreaming = part.state === "input-streaming" || part.state === "input-available";
-                                const hasResults = part.state === "output-available";
-                                const hasError = part.state === "output-error";
+                                    const webResults = hasResults ? extractSearchResults(part.output) : [];
+                                    const query = part.input?.query || "";
 
-                                if (hasError) {
-                                  return (
-                                    <div key={callId} className="my-1">
-                                      <TimelineStep
-                                        part={part}
-                                        messageId={message.id}
-                                        index={index}
-                                        status="error"
-                                        type="search"
-                                        title="Web Search Error"
-                                        subtitle={part.errorText}
-                                        icon={<AlertCircle />}
-                                        expandedTools={expandedTools}
-                                        toggleToolExpansion={toggleToolExpansion}
-                                      />
-                                    </div>
-                                  );
-                                }
-
-                                const webResults = hasResults ? extractSearchResults(part.output) : [];
-                                const query = part.input?.query || "";
-
-                                // Create favicon stack subtitle when complete
-                                let subtitleContent: React.ReactNode = query;
-                                if (!isStreaming && webResults.length > 0) {
-                                  const displayResults = webResults.slice(0, 5);
-                                  subtitleContent = (
-                                    <div className="flex flex-col gap-1">
-                                      <div className="text-xs text-gray-600 dark:text-gray-400">{query}</div>
-                                      <div className="flex items-center gap-2">
-                                        <div className="flex -space-x-2">
-                                          {displayResults.map((result: any, idx: number) => (
-                                            <div
-                                              key={idx}
-                                              className="w-5 h-5 rounded-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 flex items-center justify-center overflow-hidden"
-                                              style={{ zIndex: 5 - idx }}
-                                            >
-                                              <Favicon url={result.url} size={12} className="w-3 h-3" />
+                                    // Create favicon stack subtitle when complete
+                                    let subtitleContent: React.ReactNode = query;
+                                    if (!isStreaming && webResults.length > 0) {
+                                      const displayResults = webResults.slice(0, 5);
+                                      subtitleContent = (
+                                        <div className="flex flex-col gap-1">
+                                          <div className="text-xs text-gray-600 dark:text-gray-400">{query}</div>
+                                          <div className="flex items-center gap-2">
+                                            <div className="flex -space-x-2">
+                                              {displayResults.map((result: any, idx: number) => (
+                                                <div
+                                                  key={idx}
+                                                  className="w-5 h-5 rounded-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 flex items-center justify-center overflow-hidden"
+                                                  style={{ zIndex: 5 - idx }}
+                                                >
+                                                  <Favicon url={result.url} size={12} className="w-3 h-3" />
+                                                </div>
+                                              ))}
                                             </div>
-                                          ))}
+                                            <span className="text-xs text-gray-600 dark:text-gray-400">
+                                              {webResults.length} results
+                                            </span>
+                                          </div>
                                         </div>
-                                        <span className="text-xs text-gray-600 dark:text-gray-400">
-                                          {webResults.length} results
-                                        </span>
-                                      </div>
-                                    </div>
-                                  );
-                                }
+                                      );
+                                    }
 
-                                return (
-                                  <div key={callId}>
-                                    <TimelineStep
-                                      part={part}
-                                      messageId={message.id}
-                                      index={index}
-                                      status={isStreaming ? "streaming" : "complete"}
-                                      type="search"
-                                      title="Web Search"
-                                      subtitle={subtitleContent}
-                                      icon={<Globe />}
-                                      expandedTools={expandedTools}
-                                      toggleToolExpansion={toggleToolExpansion}
-                                    >
-                                      {hasResults && webResults.length > 0 && (
-                                        <SearchResultsCarousel
-                                          results={webResults}
-                                          type="web"
-                                        />
-                                      )}
-                                    </TimelineStep>
-                                  </div>
-                                );
-                              }
-
-                              // Wiley Search Tool
-                              case "tool-wileySearch": {
-                                const callId = part.toolCallId;
-                                const isStreaming = part.state === "input-streaming" || part.state === "input-available";
-                                const hasResults = part.state === "output-available";
-                                const hasError = part.state === "output-error";
-
-                                if (hasError) {
-                                  return (
-                                    <div key={callId} className="my-1">
-                                      <TimelineStep
-                                        part={part}
-                                        messageId={message.id}
-                                        index={index}
-                                        status="error"
-                                        type="search"
-                                        title="Wiley Search Error"
-                                        subtitle={part.errorText}
-                                        icon={<AlertCircle />}
-                                        expandedTools={expandedTools}
-                                        toggleToolExpansion={toggleToolExpansion}
-                                      />
-                                    </div>
-                                  );
-                                }
-
-                                const wileyResults = hasResults ? extractSearchResults(part.output) : [];
-                                const query = part.input?.query || "";
-                                const subtitle = isStreaming
-                                  ? query
-                                  : `${query} · ${wileyResults.length} results`;
-
-                                return (
-                                  <div key={callId}>
-                                    <TimelineStep
-                                      part={part}
-                                      messageId={message.id}
-                                      index={index}
-                                      status={isStreaming ? "streaming" : "complete"}
-                                      type="search"
-                                      title="Wiley Academic Search"
-                                      subtitle={subtitle}
-                                      icon={<BookOpen />}
-                                      expandedTools={expandedTools}
-                                      toggleToolExpansion={toggleToolExpansion}
-                                    >
-                                      {hasResults && wileyResults.length > 0 && (
-                                        <SearchResultsCarousel
-                                          results={wileyResults}
-                                          type="wiley"
-                                        />
-                                      )}
-                                    </TimelineStep>
-                                  </div>
-                                );
-                              }
-
-                              // Chart Creation Tool
-                              case "tool-createChart": {
-                                const callId = part.toolCallId;
-                                const isStreaming = part.state === "input-streaming" || part.state === "input-available";
-                                const hasOutput = part.state === "output-available";
-                                const hasError = part.state === "output-error";
-
-                                if (hasError) {
-                                  return (
-                                    <div key={callId}>
-                                      <TimelineStep
-                                        part={part}
-                                        messageId={message.id}
-                                        index={index}
-                                        status="error"
-                                        type="tool"
-                                        title="Chart Creation Error"
-                                        subtitle={part.errorText}
-                                        icon={<AlertCircle />}
-                                        expandedTools={expandedTools}
-                                        toggleToolExpansion={toggleToolExpansion}
-                                      />
-                                    </div>
-                                  );
-                                }
-
-                                const title = hasOutput && part.output?.title ? part.output.title : "Chart";
-
-                                return (
-                                  <div key={callId}>
-                                    <TimelineStep
-                                      part={part}
-                                      messageId={message.id}
-                                      index={index}
-                                      status={isStreaming ? "streaming" : "complete"}
-                                      type="tool"
-                                      title={title}
-                                      subtitle={hasOutput && part.output?.metadata ? `${part.output.metadata.totalSeries} series · ${part.output.metadata.totalDataPoints} points` : undefined}
-                                      icon={<BarChart3 />}
-                                      expandedTools={expandedTools}
-                                      toggleToolExpansion={toggleToolExpansion}
-                                    >
-                                      {hasOutput && (
-                                        <MemoizedChartResult
-                                          chartData={part.output}
-                                          actionId={callId}
+                                    return (
+                                      <div key={callId}>
+                                        <TimelineStep
+                                          part={part}
+                                          messageId={message.id}
+                                          index={index}
+                                          status={isStreaming ? "streaming" : "complete"}
+                                          type="search"
+                                          title="Web Search"
+                                          subtitle={subtitleContent}
+                                          icon={<Globe />}
                                           expandedTools={expandedTools}
                                           toggleToolExpansion={toggleToolExpansion}
-                                        />
-                                      )}
-                                    </TimelineStep>
-                                  </div>
-                                );
-                              }
+                                        >
+                                          {hasResults && webResults.length > 0 && (
+                                            <SearchResultsCarousel
+                                              results={webResults}
+                                              type="web"
+                                            />
+                                          )}
+                                        </TimelineStep>
+                                      </div>
+                                    );
+                                  }
 
-                              // CSV Creation Tool
-                              case "tool-createCSV": {
-                                const callId = part.toolCallId;
-                                const isStreaming = part.state === "input-streaming" || part.state === "input-available";
-                                const hasOutput = part.state === "output-available";
-                                const hasError = part.state === "output-error" || part.output?.error;
+                                  // Wiley Search Tool
+                                  case "tool-wileySearch": {
+                                    const callId = part.toolCallId;
+                                    const isStreaming = part.state === "input-streaming" || part.state === "input-available";
+                                    const hasResults = part.state === "output-available";
+                                    const hasError = part.state === "output-error";
 
-                                if (hasError) {
-                                  return (
-                                    <div key={callId}>
-                                      <TimelineStep
-                                        part={part}
-                                        messageId={message.id}
-                                        index={index}
-                                        status="error"
-                                        type="tool"
-                                        title="CSV Creation Error"
-                                        subtitle={part.output?.message || part.errorText}
-                                        icon={<AlertCircle />}
-                                        expandedTools={expandedTools}
-                                        toggleToolExpansion={toggleToolExpansion}
-                                      />
-                                    </div>
-                                  );
-                                }
-
-                                const title = hasOutput && part.output?.title ? part.output.title : "CSV Table";
-                                const subtitle = hasOutput ? `${part.output.rowCount} rows · ${part.output.columnCount} columns` : undefined;
-
-                                return (
-                                  <div key={callId}>
-                                    <TimelineStep
-                                      part={part}
-                                      messageId={message.id}
-                                      index={index}
-                                      status={isStreaming ? "streaming" : "complete"}
-                                      type="tool"
-                                      title={title}
-                                      subtitle={subtitle}
-                                      icon={<Table />}
-                                      expandedTools={expandedTools}
-                                      toggleToolExpansion={toggleToolExpansion}
-                                    >
-                                      {hasOutput && !part.output?.error && (
-                                        <CSVPreview {...part.output} />
-                                      )}
-                                    </TimelineStep>
-                                  </div>
-                                );
-                              }
-
-                              // Generic dynamic tool fallback (for future tools)
-                              case "dynamic-tool":
-                                return (
-                                  <div
-                                    key={index}
-                                    className="mt-2 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded p-2 sm:p-3"
-                                  >
-                                    <div className="flex items-center gap-2 text-purple-700 dark:text-purple-400 mb-2">
-                                      <Wrench className="h-4 w-4" />
-                                      <span className="font-medium">
-                                        Tool: {part.toolName}
-                                      </span>
-                                    </div>
-                                    <div className="text-sm text-purple-600 dark:text-purple-300">
-                                      {part.state === "input-streaming" && (
-                                        <pre className="bg-purple-100 dark:bg-purple-800/30 p-2 rounded text-xs">
-                                          {JSON.stringify(part.input, null, 2)}
-                                        </pre>
-                                      )}
-                                      {part.state === "output-available" && (
-                                        <pre className="bg-purple-100 dark:bg-purple-800/30 p-2 rounded text-xs">
-                                          {JSON.stringify(part.output, null, 2)}
-                                        </pre>
-                                      )}
-                                      {part.state === "output-error" && (
-                                        <div className="text-red-600 dark:text-red-300">
-                                          Error: {part.errorText}
+                                    if (hasError) {
+                                      return (
+                                        <div key={callId} className="my-1">
+                                          <TimelineStep
+                                            part={part}
+                                            messageId={message.id}
+                                            index={index}
+                                            status="error"
+                                            type="search"
+                                            title="Wiley Search Error"
+                                            subtitle={part.errorText}
+                                            icon={<AlertCircle />}
+                                            expandedTools={expandedTools}
+                                            toggleToolExpansion={toggleToolExpansion}
+                                          />
                                         </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                );
+                                      );
+                                    }
 
-                              default:
-                                return null;
-                            }
-                          }
-                        })}
+                                    const wileyResults = hasResults ? extractSearchResults(part.output) : [];
+                                    const query = part.input?.query || "";
+                                    const subtitle = isStreaming
+                                      ? query
+                                      : `${query} · ${wileyResults.length} results`;
+
+                                    return (
+                                      <div key={callId}>
+                                        <TimelineStep
+                                          part={part}
+                                          messageId={message.id}
+                                          index={index}
+                                          status={isStreaming ? "streaming" : "complete"}
+                                          type="search"
+                                          title="Wiley Academic Search"
+                                          subtitle={subtitle}
+                                          icon={<BookOpen />}
+                                          expandedTools={expandedTools}
+                                          toggleToolExpansion={toggleToolExpansion}
+                                        >
+                                          {hasResults && wileyResults.length > 0 && (
+                                            <SearchResultsCarousel
+                                              results={wileyResults}
+                                              type="wiley"
+                                            />
+                                          )}
+                                        </TimelineStep>
+                                      </div>
+                                    );
+                                  }
+
+                                  // Chart Creation Tool
+                                  case "tool-createChart": {
+                                    const callId = part.toolCallId;
+                                    const isStreaming = part.state === "input-streaming" || part.state === "input-available";
+                                    const hasOutput = part.state === "output-available";
+                                    const hasError = part.state === "output-error";
+
+                                    if (hasError) {
+                                      return (
+                                        <div key={callId}>
+                                          <TimelineStep
+                                            part={part}
+                                            messageId={message.id}
+                                            index={index}
+                                            status="error"
+                                            type="tool"
+                                            title="Chart Creation Error"
+                                            subtitle={part.errorText}
+                                            icon={<AlertCircle />}
+                                            expandedTools={expandedTools}
+                                            toggleToolExpansion={toggleToolExpansion}
+                                          />
+                                        </div>
+                                      );
+                                    }
+
+                                    const title = hasOutput && part.output?.title ? part.output.title : "Chart";
+
+                                    return (
+                                      <div key={callId}>
+                                        <TimelineStep
+                                          part={part}
+                                          messageId={message.id}
+                                          index={index}
+                                          status={isStreaming ? "streaming" : "complete"}
+                                          type="tool"
+                                          title={title}
+                                          subtitle={hasOutput && part.output?.metadata ? `${part.output.metadata.totalSeries} series · ${part.output.metadata.totalDataPoints} points` : undefined}
+                                          icon={<BarChart3 />}
+                                          expandedTools={expandedTools}
+                                          toggleToolExpansion={toggleToolExpansion}
+                                        >
+                                          {hasOutput && (
+                                            <MemoizedChartResult
+                                              chartData={part.output}
+                                              actionId={callId}
+                                              expandedTools={expandedTools}
+                                              toggleToolExpansion={toggleToolExpansion}
+                                            />
+                                          )}
+                                        </TimelineStep>
+                                      </div>
+                                    );
+                                  }
+
+                                  // CSV Creation Tool
+                                  case "tool-createCSV": {
+                                    const callId = part.toolCallId;
+                                    const isStreaming = part.state === "input-streaming" || part.state === "input-available";
+                                    const hasOutput = part.state === "output-available";
+                                    const hasError = part.state === "output-error" || part.output?.error;
+
+                                    if (hasError) {
+                                      return (
+                                        <div key={callId}>
+                                          <TimelineStep
+                                            part={part}
+                                            messageId={message.id}
+                                            index={index}
+                                            status="error"
+                                            type="tool"
+                                            title="CSV Creation Error"
+                                            subtitle={part.output?.message || part.errorText}
+                                            icon={<AlertCircle />}
+                                            expandedTools={expandedTools}
+                                            toggleToolExpansion={toggleToolExpansion}
+                                          />
+                                        </div>
+                                      );
+                                    }
+
+                                    const title = hasOutput && part.output?.title ? part.output.title : "CSV Table";
+                                    const subtitle = hasOutput ? `${part.output.rowCount} rows · ${part.output.columnCount} columns` : undefined;
+
+                                    return (
+                                      <div key={callId}>
+                                        <TimelineStep
+                                          part={part}
+                                          messageId={message.id}
+                                          index={index}
+                                          status={isStreaming ? "streaming" : "complete"}
+                                          type="tool"
+                                          title={title}
+                                          subtitle={subtitle}
+                                          icon={<Table />}
+                                          expandedTools={expandedTools}
+                                          toggleToolExpansion={toggleToolExpansion}
+                                        >
+                                          {hasOutput && !part.output?.error && (
+                                            <CSVPreview {...part.output} />
+                                          )}
+                                        </TimelineStep>
+                                      </div>
+                                    );
+                                  }
+
+                                  // Generic dynamic tool fallback (for future tools)
+                                  case "dynamic-tool":
+                                    return (
+                                      <div
+                                        key={index}
+                                        className="mt-2 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded p-2 sm:p-3"
+                                      >
+                                        <div className="flex items-center gap-2 text-purple-700 dark:text-purple-400 mb-2">
+                                          <Wrench className="h-4 w-4" />
+                                          <span className="font-medium">
+                                            Tool: {part.toolName}
+                                          </span>
+                                        </div>
+                                        <div className="text-sm text-purple-600 dark:text-purple-300">
+                                          {part.state === "input-streaming" && (
+                                            <pre className="bg-purple-100 dark:bg-purple-800/30 p-2 rounded text-xs">
+                                              {JSON.stringify(part.input, null, 2)}
+                                            </pre>
+                                          )}
+                                          {part.state === "output-available" && (
+                                            <pre className="bg-purple-100 dark:bg-purple-800/30 p-2 rounded text-xs">
+                                              {JSON.stringify(part.output, null, 2)}
+                                            </pre>
+                                          )}
+                                          {part.state === "output-error" && (
+                                            <div className="text-red-600 dark:text-red-300">
+                                              Error: {part.errorText}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+
+                                  default:
+                                    return null;
+                                }
+                              }
+                            })}
                           </>
                         );
                       })()}
@@ -3667,40 +3684,40 @@ export function ChatInterface({
 
                       {/* Show download button only for last message when session exists */}
                       {deferredMessages[deferredMessages.length - 1]?.id === message.id &&
-                       sessionIdRef.current && (
-                        user ? (
-                          <button
-                            onClick={handleDownloadPDF}
-                            disabled={isDownloadingPDF}
-                            className="inline-flex items-center gap-2 px-4 py-1.5 text-xs font-semibold text-gray-900 dark:text-gray-100 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Download full report as PDF"
-                          >
-                            {isDownloadingPDF ? (
-                              <>
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                <span>Generating...</span>
-                              </>
-                            ) : (
-                              <>
-                                <Download className="h-3.5 w-3.5" />
-                                <span>Download Report</span>
-                              </>
-                            )}
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => setShowAuthModal(true)}
-                            className="inline-flex items-center gap-2 px-4 py-1.5 text-xs font-semibold text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg transition-all hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-600 dark:hover:text-gray-400 group"
-                            title="Sign in to download reports"
-                          >
-                            <Download className="h-3.5 w-3.5" />
-                            <span>Download Report</span>
-                            <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded group-hover:bg-blue-200 dark:group-hover:bg-blue-900/50 transition-colors">
-                              Sign in
-                            </span>
-                          </button>
-                        )
-                      )}
+                        sessionIdRef.current && (
+                          user ? (
+                            <button
+                              onClick={handleDownloadPDF}
+                              disabled={isDownloadingPDF}
+                              className="inline-flex items-center gap-2 px-4 py-1.5 text-xs font-semibold text-gray-900 dark:text-gray-100 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Download full report as PDF"
+                            >
+                              {isDownloadingPDF ? (
+                                <>
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  <span>Generating...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Download className="h-3.5 w-3.5" />
+                                  <span>Download Report</span>
+                                </>
+                              )}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => setShowAuthModal(true)}
+                              className="inline-flex items-center gap-2 px-4 py-1.5 text-xs font-semibold text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg transition-all hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-600 dark:hover:text-gray-400 group"
+                              title="Sign in to download reports"
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                              <span>Download Report</span>
+                              <span className="ml-1 px-1.5 py-0.5 text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded group-hover:bg-blue-200 dark:group-hover:bg-blue-900/50 transition-colors">
+                                Sign in
+                              </span>
+                            </button>
+                          )
+                        )}
                     </div>
                   )}
                 </div>
@@ -3784,7 +3801,7 @@ export function ChatInterface({
           </>
         )}
       </AnimatePresence>
-      
+
       {/* Error Display */}
       {error && (
         <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 sm:p-4">
@@ -3871,31 +3888,31 @@ export function ChatInterface({
                   }
                   className="absolute right-2 top-1/2 -translate-y-1/2 rounded-xl h-8 w-8 p-0 bg-gray-900 hover:bg-gray-800 dark:bg-gray-100 dark:hover:bg-gray-200 dark:text-gray-900 shadow-sm transition-colors"
                 >
-                    {canStop ? (
-                      <Square className="h-4 w-4" />
-                    ) : isLoading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <svg
-                        className="h-4 w-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M5 12l14 0m-7-7l7 7-7 7"
-                        />
-                      </svg>
-                    )}
-                  </Button>
-                </div>
-              </form>
+                  {canStop ? (
+                    <Square className="h-4 w-4" />
+                  ) : isLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <svg
+                      className="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M5 12l14 0m-7-7l7 7-7 7"
+                      />
+                    </svg>
+                  )}
+                </Button>
+              </div>
+            </form>
 
             {/* Mobile Bottom Bar - Social links and disclaimer below input */}
-            <motion.div 
+            <motion.div
               className="block sm:hidden mt-4 pt-3 border-t border-gray-200 dark:border-gray-700"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}

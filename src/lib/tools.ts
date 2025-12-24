@@ -3,7 +3,6 @@ import { tool } from "ai";
 import { Valyu } from "valyu-js";
 import { track } from "@vercel/analytics/server";
 import { Daytona } from '@daytonaio/sdk';
-import { createClient } from '@/utils/supabase/server';
 import * as db from '@/lib/db';
 import { randomUUID } from 'crypto';
 
@@ -504,7 +503,7 @@ export const financeTools = {
       const sessionId = (options as any)?.experimental_context?.sessionId;
       const userTier = (options as any)?.experimental_context?.userTier;
       const isDevelopment = process.env.NEXT_PUBLIC_APP_MODE === 'development';
-      
+
       const startTime = Date.now();
 
       try {
@@ -588,9 +587,9 @@ ${execution.result || "(No output produced)"}
           } catch (cleanupError) {
           }
         }
-        
+
       } catch (error: any) {
-        
+
         return `❌ **Error**: Failed to execute Python code. ${error.message || 'Unknown error occurred'}`;
       }
     },
@@ -692,9 +691,8 @@ ${execution.result || "(No output produced)"}
           }
         }
 
-        return `❌ Error searching financial data: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`;
+        return `❌ Error searching financial data: ${error instanceof Error ? error.message : "Unknown error"
+          }`;
       }
     },
   }),
@@ -781,9 +779,8 @@ ${execution.result || "(No output produced)"}
           }
         }
 
-        return `❌ Error searching Wiley academic data: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`;
+        return `❌ Error searching Wiley academic data: ${error instanceof Error ? error.message : "Unknown error"
+          }`;
       }
     },
   }),
@@ -885,9 +882,8 @@ ${execution.result || "(No output produced)"}
           }
         }
 
-        return `❌ Error performing web search: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`;
+        return `❌ Error performing web search: ${error instanceof Error ? error.message : "Unknown error"
+          }`;
       }
     },
   }),

@@ -1,7 +1,7 @@
 import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
-// Users table - mirrors Supabase users table
+// Users table for local storage
 // Note: All users must authenticate with Valyu OAuth. Credits are handled by Valyu Platform.
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
@@ -11,7 +11,7 @@ export const users = sqliteTable("users", {
     .default(sql`(unixepoch())`),
 });
 
-// Chat sessions table - mirrors Supabase chat_sessions table
+// Chat sessions table
 export const chatSessions = sqliteTable("chat_sessions", {
   id: text("id").primaryKey(),
   userId: text("user_id")
@@ -27,7 +27,7 @@ export const chatSessions = sqliteTable("chat_sessions", {
   lastMessageAt: integer("last_message_at", { mode: "timestamp" }),
 });
 
-// Chat messages table - mirrors Supabase chat_messages table
+// Chat messages table
 export const chatMessages = sqliteTable("chat_messages", {
   id: text("id").primaryKey(),
   sessionId: text("session_id")
@@ -41,7 +41,7 @@ export const chatMessages = sqliteTable("chat_messages", {
   processingTimeMs: integer("processing_time_ms"),
 });
 
-// Charts table - mirrors Supabase charts table (requires authenticated user)
+// Charts table (requires authenticated user)
 export const charts = sqliteTable("charts", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -55,7 +55,7 @@ export const charts = sqliteTable("charts", {
     .default(sql`(unixepoch())`),
 });
 
-// CSVs table - mirrors Supabase csvs table (requires authenticated user)
+// CSVs table (requires authenticated user)
 export const csvs = sqliteTable("csvs", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),

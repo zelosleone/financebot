@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import puppeteer, { Browser } from 'puppeteer';
-import { createClient } from '@/utils/supabase/server';
+import * as db from '@/lib/db';
 import { buildPdfHtmlTemplate } from '@/lib/pdf-utils';
 import { cleanFinancialText, preprocessMarkdownText } from '@/lib/markdown-utils';
 import { Citation } from '@/lib/citation-utils';
@@ -43,14 +43,12 @@ export async function POST(request: NextRequest) {
 
     console.log('[PDF Generation] Starting PDF generation for session:', sessionId);
 
-    const supabase = await createClient();
+    // Get user for the session
+    const { data: { user } } = await db.getUser();
+    const userId = user?.id || 'local-user';
 
-    // Step 1: Fetch session and messages
-    const { data: sessionData, error: sessionError } = await supabase
-      .from('chat_sessions')
-      .select('title')
-      .eq('id', sessionId)
-      .single();
+    // Step 1: Fetch session
+    const { data: sessionData, error: sessionError } = await db.getChatSession(sessionId, userId);
 
     if (sessionError || !sessionData) {
       console.error('[PDF Generation] Session not found:', sessionError);
@@ -60,11 +58,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: messages, error: messagesError } = await supabase
-      .from('chat_messages')
-      .select('*')
-      .eq('session_id', sessionId)
-      .order('created_at', { ascending: true });
+    // Step 2: Fetch messages
+    const { data: messages, error: messagesError } = await db.getChatMessages(sessionId);
 
     if (messagesError) {
       console.error('[PDF Generation] Error fetching messages:', messagesError);
@@ -181,30 +176,22 @@ export async function POST(request: NextRequest) {
     // Fetch CSV data and convert to markdown tables
     const csvMarkdownMap = new Map<string, string>();
     for (const csvId of csvIds) {
-      const { data: csvData, error } = await supabase
-        .from('csvs')
-        .select('*')
-        .eq('id', csvId)
-        .single();
+      const { data: csvData, error } = await db.getCSV(csvId);
 
       if (!error && csvData) {
-        // Parse rows if they're stored as JSON string
-        let parsedRows = csvData.rows;
-        if (typeof csvData.rows === 'string') {
-          try {
-            parsedRows = JSON.parse(csvData.rows);
-          } catch (e) {
-            console.error('[PDF Generation] Failed to parse CSV rows:', e);
-            continue;
-          }
+        const parsedHeaders = parseJsonArray<string>(csvData.headers, []);
+        const parsedRows = parseJsonArray<any[]>(csvData.rows, []);
+
+        if (parsedHeaders.length === 0) {
+          continue;
         }
 
         // Create CSV data object
         const csvDataObj: CSVData = {
           title: csvData.title || 'Table',
           description: csvData.description,
-          headers: csvData.headers || [],
-          rows: parsedRows || [],
+          headers: parsedHeaders,
+          rows: parsedRows,
         };
 
         // Format and convert to markdown table (same as chat interface)
@@ -347,14 +334,8 @@ async function renderChartAsImage(
 ): Promise<string> {
   console.log('[PDF Generation] Rendering chart:', chartId);
 
-  const supabase = await createClient();
-
   // Fetch chart data
-  const { data: chartData, error } = await supabase
-    .from('charts')
-    .select('chart_data')
-    .eq('id', chartId)
-    .single();
+  const { data: chartData, error } = await db.getChart(chartId);
 
   if (error || !chartData) {
     console.error('[PDF Generation] Chart not found:', chartId);
@@ -366,9 +347,20 @@ async function renderChartAsImage(
   console.log('[PDF Generation] Chart data fetched, parsing...');
 
   // Parse chart data
-  const parsedChartData = typeof chartData.chart_data === 'string'
-    ? JSON.parse(chartData.chart_data)
-    : chartData.chart_data;
+  const chartDataField = (chartData as any).chart_data || (chartData as any).chartData;
+  if (!chartDataField) {
+    console.error('[PDF Generation] Chart data missing:', chartId);
+    return '';
+  }
+  let parsedChartData: any;
+  try {
+    parsedChartData = typeof chartDataField === 'string'
+      ? JSON.parse(chartDataField)
+      : chartDataField;
+  } catch (error) {
+    console.error('[PDF Generation] Failed to parse chart data:', error);
+    return '';
+  }
 
   console.log('[PDF Generation] Chart data parsed:', JSON.stringify(parsedChartData, null, 2).slice(0, 500));
 
@@ -783,6 +775,20 @@ function createChartComponentHtml(chartData: any): string {
     </body>
     </html>
   `;
+}
+
+function parseJsonArray<T>(value: unknown, fallback: T[]): T[] {
+  if (Array.isArray(value)) return value as T[];
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? (parsed as T[]) : fallback;
+    } catch (error) {
+      console.error('[PDF Generation] Failed to parse JSON array:', error);
+      return fallback;
+    }
+  }
+  return fallback;
 }
 
 /**

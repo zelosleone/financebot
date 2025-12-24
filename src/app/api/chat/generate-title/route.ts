@@ -1,6 +1,5 @@
 import { generateText } from 'ai';
 import { openai, createOpenAI } from '@ai-sdk/openai';
-import { createClient } from '@supabase/supabase-js';
 
 export async function POST(req: Request) {
   let requestBody: { message: string } | null = null;

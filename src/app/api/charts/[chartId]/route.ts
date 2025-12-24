@@ -20,7 +20,7 @@ export async function GET(
       );
     }
 
-    // Fetch chart from database (works with both Supabase and local SQLite)
+    // Fetch chart from local database
     const { data: chartData, error } = await db.getChart(chartId);
 
     if (error || !chartData) {
@@ -31,8 +31,14 @@ export async function GET(
       );
     }
 
-    // Parse chart_data if it's a string (SQLite stores as TEXT, Supabase as JSONB)
+    // Parse chart_data if it's a string (SQLite stores as TEXT)
     const chartDataField = (chartData as any).chart_data || (chartData as any).chartData;
+    if (!chartDataField) {
+      return NextResponse.json(
+        { error: 'Chart data missing' },
+        { status: 404 }
+      );
+    }
     const parsedChartData = typeof chartDataField === 'string'
       ? JSON.parse(chartDataField)
       : chartDataField;

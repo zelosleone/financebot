@@ -3,7 +3,6 @@ import { financeTools } from "@/lib/tools";
 import { FinanceUIMessage } from "@/lib/types";
 import { openai, createOpenAI } from "@ai-sdk/openai";
 import { createOllama, ollama } from "ollama-ai-provider-v2";
-import { createClient } from '@supabase/supabase-js';
 import * as db from '@/lib/db';
 import { isDevelopmentMode } from '@/lib/local-db/local-auth';
 import { saveChatMessages } from '@/lib/db';
@@ -45,15 +44,6 @@ export async function POST(req: Request) {
     // Log Valyu token status
     if (valyuAccessToken) {
       console.log("[Chat API] Valyu access token present (for API proxy)");
-    }
-
-    // Legacy Supabase clients (only used in production mode for user data)
-    let supabase: any = null;
-    if (!isDevelopment) {
-      supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!
-      );
     }
 
     // Detect available API keys and select provider/tools accordingly
@@ -246,28 +236,32 @@ export async function POST(req: Request) {
       console.log('[Chat API] Saving user message immediately before streaming');
       const lastMessage = messages[messages.length - 1];
       if (lastMessage.role === 'user') {
-        const { randomUUID } = await import('crypto');
-        const userMessageToSave = {
-          id: randomUUID(), // Generate proper UUID instead of using AI SDK's short ID
-          role: 'user' as const,
-          content: lastMessage.parts || [],
-        };
+        try {
+          const { randomUUID } = await import('crypto');
+          const userMessageToSave = {
+            id: randomUUID(), // Generate proper UUID instead of using AI SDK's short ID
+            role: 'user' as const,
+            content: lastMessage.parts || [],
+          };
 
-        // Get existing messages first
-        const { data: existingMessages } = await db.getChatMessages(sessionId);
-        const allMessages = [...(existingMessages || []), userMessageToSave];
+          // Get existing messages first
+          const { data: existingMessages } = await db.getChatMessages(sessionId);
+          const allMessages = [...(existingMessages || []), userMessageToSave];
 
-        await saveChatMessages(sessionId, allMessages.map((msg: any) => ({
-          id: msg.id,
-          role: msg.role,
-          content: typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content,
-        })));
+          await saveChatMessages(sessionId, allMessages.map((msg: any) => ({
+            id: msg.id,
+            role: msg.role,
+            content: typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content,
+          })));
 
-        // Update session timestamp
-        await db.updateChatSession(sessionId, user.id, {
-          last_message_at: new Date()
-        });
-        console.log('[Chat API] User message saved');
+          // Update session timestamp
+          await db.updateChatSession(sessionId, user.id, {
+            last_message_at: new Date()
+          });
+          console.log('[Chat API] User message saved');
+        } catch (saveError) {
+          console.warn('[Chat API] Failed to save user message:', saveError);
+        }
       }
     }
 
@@ -580,55 +574,58 @@ export async function POST(req: Request) {
 
         if (user && sessionId) {
           console.log('[Chat API] Saving messages to session:', sessionId);
+          try {
+            // The correct pattern: Save ALL messages from the conversation
+            // This replaces all messages in the session with the complete, up-to-date conversation
+            const { randomUUID } = await import('crypto');
+            const messagesToSave = allMessages.map((message: any, index: number) => {
+              // AI SDK v5 uses 'parts' array for UIMessage
+              let contentToSave = [];
 
-          // The correct pattern: Save ALL messages from the conversation
-          // This replaces all messages in the session with the complete, up-to-date conversation
-          const { randomUUID } = await import('crypto');
-          const messagesToSave = allMessages.map((message: any, index: number) => {
-            // AI SDK v5 uses 'parts' array for UIMessage
-            let contentToSave = [];
+              if (message.parts && Array.isArray(message.parts)) {
+                contentToSave = message.parts;
+              } else if (message.content) {
+                // Fallback for older format
+                if (typeof message.content === 'string') {
+                  contentToSave = [{ type: 'text', text: message.content }];
+                } else if (Array.isArray(message.content)) {
+                  contentToSave = message.content;
+                }
+              }
 
-            if (message.parts && Array.isArray(message.parts)) {
-              contentToSave = message.parts;
-            } else if (message.content) {
-              // Fallback for older format
-              if (typeof message.content === 'string') {
-                contentToSave = [{ type: 'text', text: message.content }];
-              } else if (Array.isArray(message.content)) {
-                contentToSave = message.content;
+              return {
+                id: message.id && message.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+                  ? message.id
+                  : randomUUID(), // Generate UUID if message.id is not a valid UUID
+                role: message.role,
+                content: contentToSave,
+                processing_time_ms:
+                  message.role === 'assistant' &&
+                  index === allMessages.length - 1 &&
+                  processingTimeMs !== undefined
+                    ? processingTimeMs
+                    : undefined,
+              };
+            });
+
+            const saveResult = await saveChatMessages(sessionId, messagesToSave);
+            if (saveResult.error) {
+              console.error('[Chat API] Error saving messages:', saveResult.error);
+            } else {
+              console.log('[Chat API] Successfully saved', messagesToSave.length, 'messages to session:', sessionId);
+
+              // Update session's last_message_at timestamp
+              const updateResult = await db.updateChatSession(sessionId, user.id, {
+                last_message_at: new Date()
+              });
+              if (updateResult.error) {
+                console.error('[Chat API] Error updating session timestamp:', updateResult.error);
+              } else {
+                console.log('[Chat API] Updated session timestamp for:', sessionId);
               }
             }
-
-            return {
-              id: message.id && message.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
-                ? message.id
-                : randomUUID(), // Generate UUID if message.id is not a valid UUID
-              role: message.role,
-              content: contentToSave,
-              processing_time_ms:
-                message.role === 'assistant' &&
-                index === allMessages.length - 1 &&
-                processingTimeMs !== undefined
-                  ? processingTimeMs
-                  : undefined,
-            };
-          });
-
-          const saveResult = await saveChatMessages(sessionId, messagesToSave);
-          if (saveResult.error) {
-            console.error('[Chat API] Error saving messages:', saveResult.error);
-          } else {
-            console.log('[Chat API] Successfully saved', messagesToSave.length, 'messages to session:', sessionId);
-
-            // Update session's last_message_at timestamp
-            const updateResult = await db.updateChatSession(sessionId, user.id, {
-              last_message_at: new Date()
-            });
-            if (updateResult.error) {
-              console.error('[Chat API] Error updating session timestamp:', updateResult.error);
-            } else {
-              console.log('[Chat API] Updated session timestamp for:', sessionId);
-            }
+          } catch (saveError) {
+            console.warn('[Chat API] Failed to persist messages:', saveError);
           }
         } else {
           console.log('[Chat API] Skipping message save - user:', !!user, 'sessionId:', sessionId);

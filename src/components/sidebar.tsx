@@ -6,7 +6,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/lib/stores/use-auth-store';
-import { createClient } from '@/utils/supabase/client-wrapper';
+import {
+  CachedSession,
+  loadCachedSessions,
+  normalizeCachedSession,
+  removeCachedSession,
+  saveCachedSessions,
+} from '@/lib/chat-cache';
 import {
   MessageSquare,
   MessagesSquare,
@@ -62,15 +68,25 @@ export function Sidebar({
   const { data: sessions = [], isLoading: loadingSessions } = useQuery({
     queryKey: ['sessions'],
     queryFn: async () => {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
+      const cached = loadCachedSessions();
 
-      const response = await fetch('/api/chat/sessions', {
-        headers: { 'Authorization': `Bearer ${session?.access_token}` }
-      });
+      try {
+        const response = await fetch('/api/chat/sessions');
+        if (response.ok) {
+          const payload = await response.json();
+          const normalized = (payload.sessions || [])
+            .map(normalizeCachedSession)
+            .filter((session): session is CachedSession => !!session);
+          if (normalized.length > 0) {
+            saveCachedSessions(normalized);
+          }
+          return normalized.length > 0 ? normalized : cached;
+        }
+      } catch {
+        // Fall back to cached sessions if the API is unavailable
+      }
 
-      const { sessions } = await response.json();
-      return sessions;
+      return cached;
     },
     enabled: !!user
   });
@@ -78,18 +94,14 @@ export function Sidebar({
   // Delete session mutation
   const deleteMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-
       await fetch(`/api/chat/sessions/${sessionId}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${session?.access_token}` }
       });
-
       return sessionId;
     },
     onSuccess: (sessionId) => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      removeCachedSession(sessionId);
       if (currentSessionId === sessionId) {
         onNewChat?.();
       }
@@ -219,18 +231,16 @@ export function Sidebar({
               <div className="relative group/tooltip">
                 <button
                   onClick={() => setAlwaysOpen(!alwaysOpen)}
-                  className={`w-12 h-12 flex items-center justify-center rounded-[20px] transition-all duration-200 hover:scale-110 active:scale-95 ${
-                    alwaysOpen
-                      ? 'bg-blue-100 dark:bg-blue-900/30'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-800'
-                  }`}
+                  className={`w-12 h-12 flex items-center justify-center rounded-[20px] transition-all duration-200 hover:scale-110 active:scale-95 ${alwaysOpen
+                    ? 'bg-blue-100 dark:bg-blue-900/30'
+                    : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                    }`}
                 >
                   <svg
-                    className={`w-6 h-6 transition-colors ${
-                      alwaysOpen
-                        ? 'text-blue-600 dark:text-blue-400'
-                        : 'text-gray-600 dark:text-gray-400'
-                    }`}
+                    className={`w-6 h-6 transition-colors ${alwaysOpen
+                      ? 'text-blue-600 dark:text-blue-400'
+                      : 'text-gray-600 dark:text-gray-400'
+                      }`}
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -288,7 +298,7 @@ export function Sidebar({
                 </div>
               )}
 
-                      {/* History */}
+              {/* History */}
               <div className="relative group/tooltip">
                 <button
                   onClick={() => {
@@ -298,21 +308,19 @@ export function Sidebar({
                       setShowHistory(!showHistory);
                     }
                   }}
-                  className={`w-12 h-12 flex items-center justify-center rounded-[20px] transition-all duration-200 hover:scale-110 active:scale-95 ${
-                    !user
-                      ? 'opacity-50 cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-800'
-                      : showHistory
-                        ? 'bg-gray-900 dark:bg-gray-100 shadow-lg'
-                        : 'hover:bg-gray-100 dark:hover:bg-gray-800'
-                  }`}
+                  className={`w-12 h-12 flex items-center justify-center rounded-[20px] transition-all duration-200 hover:scale-110 active:scale-95 ${!user
+                    ? 'opacity-50 cursor-not-allowed hover:bg-gray-100 dark:hover:bg-gray-800'
+                    : showHistory
+                      ? 'bg-gray-900 dark:bg-gray-100 shadow-lg'
+                      : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+                    }`}
                 >
-                  <MessagesSquare className={`h-6 w-6 transition-colors ${
-                    !user
-                      ? 'text-gray-400 dark:text-gray-600'
-                      : showHistory
-                        ? 'text-white dark:text-gray-900'
-                        : 'text-gray-600 dark:text-gray-400'
-                  }`} />
+                  <MessagesSquare className={`h-6 w-6 transition-colors ${!user
+                    ? 'text-gray-400 dark:text-gray-600'
+                    : showHistory
+                      ? 'text-white dark:text-gray-900'
+                      : 'text-gray-600 dark:text-gray-400'
+                    }`} />
                 </button>
                 <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium rounded-lg opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50">
                   {!user ? 'Sign up (free) for history' : 'History'}
@@ -413,32 +421,32 @@ export function Sidebar({
                           transition={{ duration: 0.15 }}
                           className="absolute left-full ml-4 bottom-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl py-2 px-1 min-w-[220px] z-50"
                         >
-                        {/* User Email */}
-                        <div className="px-3 py-2.5 mb-1">
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Signed in as</p>
-                          <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                            {user.email}
-                          </p>
-                        </div>
+                          {/* User Email */}
+                          <div className="px-3 py-2.5 mb-1">
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Signed in as</p>
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                              {user.email}
+                            </p>
+                          </div>
 
-                        {/* Divider */}
-                        <div className="h-px bg-gray-200 dark:bg-gray-700 my-1" />
+                          {/* Divider */}
+                          <div className="h-px bg-gray-200 dark:bg-gray-700 my-1" />
 
-                        {/* Sign Out */}
-                        <button
-                          onClick={() => {
-                            setShowProfileMenu(false);
-                            const confirmed = window.confirm('Are you sure you want to sign out?');
-                            if (confirmed) {
-                              signOut();
-                            }
-                          }}
-                          className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all duration-200"
-                        >
-                          <LogOut className="h-4 w-4" />
-                          <span className="font-medium">Sign out</span>
-                        </button>
-                      </motion.div>
+                          {/* Sign Out */}
+                          <button
+                            onClick={() => {
+                              setShowProfileMenu(false);
+                              const confirmed = window.confirm('Are you sure you want to sign out?');
+                              if (confirmed) {
+                                signOut();
+                              }
+                            }}
+                            className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all duration-200"
+                          >
+                            <LogOut className="h-4 w-4" />
+                            <span className="font-medium">Sign out</span>
+                          </button>
+                        </motion.div>
                       </>
                     )}
                   </AnimatePresence>
@@ -542,9 +550,8 @@ export function Sidebar({
                       <div
                         key={session.id}
                         onClick={() => handleSessionSelect(session.id)}
-                        className={`flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 group cursor-pointer transition-colors ${
-                          currentSessionId === session.id ? 'bg-gray-100 dark:bg-gray-800' : ''
-                        }`}
+                        className={`flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 group cursor-pointer transition-colors ${currentSessionId === session.id ? 'bg-gray-100 dark:bg-gray-800' : ''
+                          }`}
                       >
                         <MessageSquare className="h-4 w-4 text-gray-400 dark:text-gray-500 flex-shrink-0" />
                         <div className="flex-1 min-w-0">

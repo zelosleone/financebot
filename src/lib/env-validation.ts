@@ -34,12 +34,9 @@ export function validatePaymentEnvironment(): EnvValidationResult {
     };
   }
 
-  // Production mode - require full Valyu OAuth + App Supabase
+  // Production mode - require Valyu OAuth
 
   // Valyu OAuth requirements (4 required variables)
-  if (!process.env.NEXT_PUBLIC_VALYU_SUPABASE_URL) {
-    errors.push('NEXT_PUBLIC_VALYU_SUPABASE_URL is required for Valyu OAuth');
-  }
   if (!process.env.NEXT_PUBLIC_VALYU_CLIENT_ID) {
     errors.push('NEXT_PUBLIC_VALYU_CLIENT_ID is required for Valyu OAuth');
   }
@@ -48,17 +45,6 @@ export function validatePaymentEnvironment(): EnvValidationResult {
   }
   if (!process.env.VALYU_APP_URL && !process.env.NEXT_PUBLIC_VALYU_APP_URL) {
     errors.push('VALYU_APP_URL is required for Valyu OAuth proxy');
-  }
-
-  // App's own Supabase (for user data storage)
-  if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-    errors.push('NEXT_PUBLIC_SUPABASE_URL is required for app data storage');
-  }
-  if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-    errors.push('NEXT_PUBLIC_SUPABASE_ANON_KEY is required');
-  }
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    errors.push('SUPABASE_SERVICE_ROLE_KEY is required');
   }
 
   // Other API requirements
@@ -75,11 +61,11 @@ export function validatePaymentEnvironment(): EnvValidationResult {
   }
 
   // Validate URL formats
-  if (process.env.NEXT_PUBLIC_SUPABASE_URL && !process.env.NEXT_PUBLIC_SUPABASE_URL.startsWith('https://')) {
-    errors.push('NEXT_PUBLIC_SUPABASE_URL must be a valid HTTPS URL');
+  if (process.env.VALYU_APP_URL && !process.env.VALYU_APP_URL.startsWith('https://')) {
+    errors.push('VALYU_APP_URL must be a valid HTTPS URL');
   }
-  if (process.env.NEXT_PUBLIC_VALYU_SUPABASE_URL && !process.env.NEXT_PUBLIC_VALYU_SUPABASE_URL.startsWith('https://')) {
-    errors.push('NEXT_PUBLIC_VALYU_SUPABASE_URL must be a valid HTTPS URL');
+  if (process.env.NEXT_PUBLIC_VALYU_APP_URL && !process.env.NEXT_PUBLIC_VALYU_APP_URL.startsWith('https://')) {
+    errors.push('NEXT_PUBLIC_VALYU_APP_URL must be a valid HTTPS URL');
   }
 
   return {

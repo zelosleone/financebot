@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
-import { ImageResponse } from 'next/og';
+import * as db from '@/lib/db';
 
 /**
  * GET /api/charts/[chartId]/render
@@ -13,23 +12,21 @@ export async function GET(
   try {
     const { chartId } = await params;
 
-    const supabase = await createClient();
-
     // Fetch chart data
-    const { data: chartData, error } = await supabase
-      .from('charts')
-      .select('chart_data')
-      .eq('id', chartId)
-      .single();
+    const { data: chartData, error } = await db.getChart(chartId);
 
     if (error || !chartData) {
       return new NextResponse('Chart not found', { status: 404 });
     }
 
     // Parse chart data
-    const parsedChartData = typeof chartData.chart_data === 'string'
-      ? JSON.parse(chartData.chart_data)
-      : chartData.chart_data;
+    const chartDataField = (chartData as any).chart_data || (chartData as any).chartData;
+    if (!chartDataField) {
+      return new NextResponse('Chart data missing', { status: 404 });
+    }
+    const parsedChartData = typeof chartDataField === 'string'
+      ? JSON.parse(chartDataField)
+      : chartDataField;
 
     // Return HTML page with chart
     const html = `

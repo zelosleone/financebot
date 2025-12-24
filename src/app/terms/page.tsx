@@ -25,7 +25,7 @@ export default function TermsOfService() {
               <li>OpenAI GPT-5 for natural language processing</li>
               <li>Valyu API for data search and retrieval</li>
               <li>Daytona for code execution</li>
-              <li>Supabase for authentication and data storage</li>
+              <li>Local browser storage for chat history</li>
             </ul>
           </section>
 

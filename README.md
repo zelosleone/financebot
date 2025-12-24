@@ -55,8 +55,8 @@ Finance makes all this data accessible through natural language:
 Finance supports two distinct operating modes:
 
 **Development Mode** (Recommended for Forking)
-- No Supabase or auth setup required - just clone and run
-- Uses local SQLite database for all data
+- No hosted database or auth setup required - just clone and run
+- Uses local SQLite plus browser cache for data
 - Auto-login as dev user - no sign-up needed
 - Unlimited queries - no rate limits
 - Supports Ollama, LM Studio, and OpenAI for LLM
@@ -66,7 +66,7 @@ Finance supports two distinct operating modes:
 **Production Mode** (Used by finance.valyu.ai)
 - Sign in with Valyu for authentication
 - $10 free credits on signup, no credit card required
-- Uses Supabase for user data and chat history
+- Stores chat history in browser cache
 - Contact Valyu for production setup
 
 
@@ -78,7 +78,6 @@ Finance supports two distinct operating modes:
 - Valyu account and credentials (contact Valyu for production setup)
 - OpenAI API key
 - Daytona API key (for code execution)
-- Supabase account and project
 
 **For Development Mode (Recommended for getting started):**
 - Node.js 18+
@@ -106,7 +105,7 @@ Finance supports two distinct operating modes:
 
    **For Development Mode (Easy Setup):**
    ```env
-   # Enable Development Mode (No Supabase, No Auth, No Billing)
+   # Enable Development Mode (Local Cache, No Auth, No Billing)
    NEXT_PUBLIC_APP_MODE=development
 
    # Valyu API Configuration (Required)
@@ -132,7 +131,6 @@ Finance supports two distinct operating modes:
    NEXT_PUBLIC_APP_URL=https://yourdomain.com
 
    # Valyu Credentials (contact Valyu for production setup)
-   NEXT_PUBLIC_VALYU_SUPABASE_URL=https://xxx.supabase.co
    NEXT_PUBLIC_VALYU_CLIENT_ID=your-client-id
    VALYU_CLIENT_SECRET=your-client-secret
    VALYU_APP_URL=https://platform.valyu.ai
@@ -146,10 +144,6 @@ Finance supports two distinct operating modes:
    # Daytona Configuration
    DAYTONA_API_KEY=your-daytona-api-key
 
-   # Your App's Supabase (for user data)
-   NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
-   SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
    ```
 
 4. **Run the development server**
@@ -170,7 +164,7 @@ Finance supports two distinct operating modes:
 
 Development mode provides a complete local development environment without any external dependencies beyond the core APIs (Valyu, Daytona). It's perfect for:
 
-- **Local Development** - No Supabase setup required
+- **Local Development** - No hosted database setup required
 - **Offline Work** - All data stored locally in SQLite
 - **Testing Features** - Unlimited queries without billing
 - **Privacy** - Use local Ollama models, no cloud LLM needed
@@ -183,7 +177,7 @@ When `NEXT_PUBLIC_APP_MODE=development`:
 1. **Local SQLite Database** (`/.local-data/dev.db`)
    - Automatically created on first run
    - Stores chat sessions, messages, charts, and CSVs
-   - Full schema matching production Supabase tables
+   - Full schema for chat sessions, messages, charts, and CSVs
    - Easy to inspect with `sqlite3 .local-data/dev.db`
 
 2. **Mock Authentication**
@@ -386,7 +380,7 @@ Not all models support all features. Here's what works:
 
 ✅ **No Hidden Costs**
 - No OpenAI API usage (when using Ollama)
-- No Supabase database costs
+- No hosted database costs
 - No authentication service costs
 
 ### Managing Local Database
@@ -414,15 +408,15 @@ cp -r .local-data/ .local-data-backup/
 
 **Development → Production:**
 1. Remove/comment `NEXT_PUBLIC_APP_MODE=development`
-2. Add all Supabase and Polar environment variables
+2. Add production environment variables
 3. Restart server
 
 **Production → Development:**
 1. Add `NEXT_PUBLIC_APP_MODE=development`
 2. Restart server
-3. Local database automatically created
+3. Local database and browser cache automatically created
 
-**Note:** Your production Supabase data and local SQLite data are completely separate. Switching modes doesn't migrate data.
+**Note:** Production and development data are stored separately. Switching modes doesn't migrate data.
 
 ### Troubleshooting Development Mode
 
@@ -491,44 +485,7 @@ Used for secure Python code execution, enabling data analysis, visualizations, a
 3. Get your API key from the dashboard
 4. Copy the key
 
-### 2. Set Up Supabase Database
-
-#### Create Supabase Project
-
-1. Go to [supabase.com](https://supabase.com)
-2. Create a new project
-3. Wait for the project to be provisioned (2-3 minutes)
-4. Go to Project Settings → API
-5. Copy these values:
-   - `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`
-   - `anon public` key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `service_role` key → `SUPABASE_SERVICE_ROLE_KEY` (keep this secret!)
-
-#### Create Database Tables
-
-1. In Supabase Dashboard, go to **SQL Editor**
-2. Click **New Query**
-3. Copy the contents of [`supabase/schema.sql`](supabase/schema.sql) and run it
-
-#### Set Up Row Level Security
-
-1. In the SQL Editor, create another new query
-2. Copy the contents of [`supabase/policies.sql`](supabase/policies.sql) and run it
-
-#### Configure Authentication
-
-1. Go to **Authentication** → **Providers** in Supabase
-2. Enable **Email** provider (enabled by default)
-3. **Optional:** Enable additional providers (Google, GitHub, etc.)
-   - For Google: Add credentials from Google Cloud Console
-   - For GitHub: Add app credentials from GitHub Settings
-
-4. Go to **Authentication** → **URL Configuration**
-5. Add your site URL and redirect URLs:
-   - Site URL: `https://yourdomain.com` (or `http://localhost:3000` for testing)
-   - Redirect URLs: `https://yourdomain.com/auth/callback`
-
-### 3. Configure Environment Variables
+### 2. Configure Environment Variables
 
 Create `.env.local` in your project root:
 
@@ -538,7 +495,6 @@ NEXT_PUBLIC_APP_MODE=production
 NEXT_PUBLIC_APP_URL=https://yourdomain.com
 
 # Valyu Credentials (provided by Valyu for production)
-NEXT_PUBLIC_VALYU_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_VALYU_CLIENT_ID=your-client-id
 VALYU_CLIENT_SECRET=your-client-secret
 VALYU_APP_URL=https://platform.valyu.ai
@@ -549,13 +505,9 @@ OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 # Daytona Configuration (Code Execution)
 DAYTONA_API_KEY=your-daytona-api-key
 
-# Your App's Supabase (for user data and chat history)
-NEXT_PUBLIC_SUPABASE_URL=https://xxxxxxxxxxxxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
 
-### 4. Deploy to Production
+### 3. Deploy to Production
 
 #### Deploy to Vercel (Recommended)
 
@@ -577,35 +529,34 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 - **Railway**: Good for full-stack apps
 - **Self-hosted**: Use Docker with PM2 or similar
 
-### 5. Post-Deployment Setup
+### 4. Post-Deployment Setup
 
 1. **Test Authentication:**
    - Visit your site
    - Click "Sign in with Valyu"
    - Complete sign in on Valyu Platform
-   - Check that user appears in your Supabase Users table
+   - Confirm chat history persists after a page refresh
 
 2. **Test Financial Data:**
    - Ask a question like "What is Apple's latest stock price?"
    - Verify Valyu is returning data
-   - Check that charts and CSVs are saving to database
+   - Check that charts and CSVs render correctly
 
 3. **Test Credits:**
    - Make some API queries
    - Check Valyu Platform for credit usage
    - Verify credits are being deducted correctly
 
-### 6. Troubleshooting
+### 5. Troubleshooting
 
 **Authentication Issues:**
 - Verify Valyu credentials are correct (Client ID, Client Secret)
 - Check redirect URI matches exactly (including /auth/valyu/callback)
 - Clear browser localStorage and try again
 
-**Database Errors:**
-- Verify all tables were created successfully
-- Check RLS policies are enabled
-- Review Supabase logs for detailed errors
+**Storage Errors:**
+- Clear browser localStorage and try again
+- Restart the server and reload the page
 
 **No Financial Data:**
 - Verify user is signed in
@@ -616,13 +567,11 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 - Check Valyu Platform for credit balance
 - Review Valyu Platform dashboard for API usage logs
 
-### 7. Security Best Practices
+### 6. Security Best Practices
 
 **Do:**
-- Keep `SUPABASE_SERVICE_ROLE_KEY` secret (never expose client-side)
 - Keep `VALYU_CLIENT_SECRET` secret (never expose client-side)
 - Use environment variables for all secrets
-- Enable RLS on all Supabase tables
 - Regularly rotate API keys
 - Use HTTPS in production
 
@@ -632,12 +581,7 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 - Disable RLS policies
 - Use the same API keys for dev and production
 
-### 8. Monitoring & Maintenance
-
-**Supabase:**
-- Monitor database usage in Supabase dashboard
-- Set up database backups (automatic in paid plan)
-- Review auth logs for suspicious activity
+### 7. Monitoring & Maintenance
 
 **Valyu Platform:**
 - Monitor credit usage and top up as needed
