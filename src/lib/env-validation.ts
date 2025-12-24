@@ -1,5 +1,5 @@
 // Environment variable validation for critical systems
-// Now using Valyu OAuth for auth and billing (no more Polar)
+// Production mode uses GLM as primary LLM provider
 
 interface EnvValidationResult {
   valid: boolean;
@@ -12,19 +12,18 @@ export function validatePaymentEnvironment(): EnvValidationResult {
   const warnings: string[] = [];
 
   const isDevelopmentMode = process.env.NEXT_PUBLIC_APP_MODE === 'development';
-  const isProductionMode = !isDevelopmentMode;
 
   // Development mode - minimal requirements
   if (isDevelopmentMode) {
     // Just need basic API keys for development
-    if (!process.env.VALYU_API_KEY && !process.env.NEXT_PUBLIC_VALYU_CLIENT_ID) {
-      warnings.push('Neither VALYU_API_KEY nor Valyu OAuth credentials are set - searches will fail');
+    if (!process.env.VALYU_API_KEY) {
+      warnings.push('VALYU_API_KEY missing - financial/web search may not work');
     }
     if (!process.env.DAYTONA_API_KEY) {
       warnings.push('DAYTONA_API_KEY missing - code execution will fail');
     }
-    if (!process.env.OPENAI_API_KEY && !process.env.OLLAMA_BASE_URL && !process.env.LMSTUDIO_BASE_URL) {
-      warnings.push('No LLM provider configured - set OPENAI_API_KEY, OLLAMA_BASE_URL, or LMSTUDIO_BASE_URL');
+    if (!process.env.OPENAI_API_KEY && !process.env.GLM_API_KEY && !process.env.OLLAMA_BASE_URL && !process.env.LMSTUDIO_BASE_URL) {
+      warnings.push('No LLM provider configured - set GLM_API_KEY, OPENAI_API_KEY, OLLAMA_BASE_URL, or LMSTUDIO_BASE_URL');
     }
 
     return {
@@ -34,38 +33,32 @@ export function validatePaymentEnvironment(): EnvValidationResult {
     };
   }
 
-  // Production mode - require Valyu OAuth
+  // Production mode - require LLM provider (GLM preferred, OpenAI as fallback)
 
-  // Valyu OAuth requirements (4 required variables)
-  if (!process.env.NEXT_PUBLIC_VALYU_CLIENT_ID) {
-    errors.push('NEXT_PUBLIC_VALYU_CLIENT_ID is required for Valyu OAuth');
+  // Check for LLM provider
+  const hasGLM = !!process.env.GLM_API_KEY;
+  const hasOpenAI = !!process.env.OPENAI_API_KEY;
+
+  if (!hasGLM && !hasOpenAI) {
+    errors.push('GLM_API_KEY or OPENAI_API_KEY is required for production');
   }
-  if (!process.env.VALYU_CLIENT_SECRET) {
-    errors.push('VALYU_CLIENT_SECRET is required for Valyu OAuth');
-  }
-  if (!process.env.VALYU_APP_URL && !process.env.NEXT_PUBLIC_VALYU_APP_URL) {
-    errors.push('VALYU_APP_URL is required for Valyu OAuth proxy');
+
+  if (hasGLM) {
+    // GLM is configured - log status
+    if (!process.env.GLM_BASE_URL) {
+      warnings.push('GLM_BASE_URL not set - using default: https://api.z.ai/api/coding/paas/v4');
+    }
+    console.log('[ENV] GLM configured as primary LLM provider');
   }
 
   // Other API requirements
   if (!process.env.DAYTONA_API_KEY) {
     warnings.push('DAYTONA_API_KEY missing - code execution will fail');
   }
-  if (!process.env.OPENAI_API_KEY) {
-    warnings.push('OPENAI_API_KEY missing - will use Vercel AI Gateway');
-  }
 
-  // Optional fallback API key
+  // Valyu API key for search tools (optional but recommended)
   if (!process.env.VALYU_API_KEY) {
-    warnings.push('VALYU_API_KEY missing - no fallback for anonymous users');
-  }
-
-  // Validate URL formats
-  if (process.env.VALYU_APP_URL && !process.env.VALYU_APP_URL.startsWith('https://')) {
-    errors.push('VALYU_APP_URL must be a valid HTTPS URL');
-  }
-  if (process.env.NEXT_PUBLIC_VALYU_APP_URL && !process.env.NEXT_PUBLIC_VALYU_APP_URL.startsWith('https://')) {
-    errors.push('NEXT_PUBLIC_VALYU_APP_URL must be a valid HTTPS URL');
+    warnings.push('VALYU_API_KEY missing - financial/web search may not work');
   }
 
   return {

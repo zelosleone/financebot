@@ -27,7 +27,8 @@ export async function POST(req: Request) {
 
     // REQUIRE VALYU AUTHENTICATION in production mode
     // Users must sign in with Valyu to use the app - credits are handled by Valyu
-    if (!isDevelopment && !valyuAccessToken) {
+    // GLM production mode - no Valyu auth required
+    if (false) {
       console.log("[Chat API] No Valyu token - authentication required");
       return new Response(
         JSON.stringify({
@@ -601,8 +602,8 @@ export async function POST(req: Request) {
                 content: contentToSave,
                 processing_time_ms:
                   message.role === 'assistant' &&
-                  index === allMessages.length - 1 &&
-                  processingTimeMs !== undefined
+                    index === allMessages.length - 1 &&
+                    processingTimeMs !== undefined
                     ? processingTimeMs
                     : undefined,
               };
@@ -654,7 +655,7 @@ export async function POST(req: Request) {
 
     // Check if it's a tool/function calling compatibility error
     const isToolError = errorMessage.toLowerCase().includes('tool') ||
-                       errorMessage.toLowerCase().includes('function');
+      errorMessage.toLowerCase().includes('function');
     const isThinkingError = errorMessage.toLowerCase().includes('thinking');
 
     // Log full error details for debugging
